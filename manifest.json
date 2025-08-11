@@ -1,0 +1,84 @@
+{
+  "manifest_version": 3,
+  "name": "Job Tracker",
+  "version": "1.0.0",
+  "description": "Track job applications from LinkedIn, Workday, and Oracle/Taleo, appending to your Google Sheet.",
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_title": "Job Tracker"
+  },
+  "options_page": "src/options/index.html",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "identity",
+    "storage",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://*.linkedin.com/*",
+    "https://*.workday.com/*",
+    "https://*.myworkdayjobs.com/*",
+    "https://*.taleo.net/*",
+    "https://*.oraclecloud.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.linkedin.com/*"
+      ],
+      "js": ["content-linkedin.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://jobs.lever.co/*"
+      ],
+      "js": ["content-lever.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://*.workday.com/*",
+        "https://*.myworkdayjobs.com/*"
+      ],
+      "js": ["content-workday.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://*.taleo.net/*",
+        "https://*.oraclecloud.com/*"
+      ],
+      "js": ["content-oracle-taleo.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "exclude_matches": [
+        "https://*.linkedin.com/*",
+        "https://*.workday.com/*",
+        "https://*.myworkdayjobs.com/*",
+        "https://*.taleo.net/*",
+        "https://*.oraclecloud.com/*",
+        "https://accounts.google.com/*",
+        "https://*.google.com/recaptcha/*",
+        "https://*.gstatic.com/*",
+        "https://*.googleusercontent.com/*"
+      ],
+      "js": ["content-generic.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}
+

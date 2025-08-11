@@ -1,0 +1,23 @@
+:root {
+  --jt-bg: rgba(17, 24, 39, 0.95);
+  --jt-fg: #e5e7eb;
+}
+.jt-toast {
+  position: fixed;
+  z-index: 2147483647;
+  right: 16px;
+  bottom: 16px;
+  background: var(--jt-bg);
+  color: var(--jt-fg);
+  padding: 10px 14px;
+  border-radius: 8px;
+  box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+.jt-toast-hide {
+  animation: jt-fade 0.3s ease forwards;
+}
+@keyframes jt-fade {
+  to { opacity: 0; transform: translateY(8px); }
+}
+
