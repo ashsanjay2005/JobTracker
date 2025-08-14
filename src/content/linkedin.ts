@@ -116,6 +116,29 @@ function linkToJobView(root: Document | Element = getRightPanelRoot()): string |
   return null;
 }
 
+function cleanLinkedInJobUrl(raw: string | null | undefined): string {
+  const ensureCanonical = (jobId: string | null): string => {
+    return jobId ? `https://www.linkedin.com/jobs/view/${jobId}/` : '';
+  };
+  try {
+    const input = (raw || '').trim() || location.href;
+    const u = new URL(input, location.origin);
+    // 1) Try to extract from pathname /jobs/view/<id>
+    const m = u.pathname.match(/\/jobs\/view\/(\d+)/);
+    if (m && m[1]) return ensureCanonical(m[1]);
+    // 2) Try query params (currentJobId, postApplyJobId)
+    const params = u.searchParams;
+    const jid = params.get('currentJobId') || params.get('postApplyJobId') || params.get('jobId');
+    if (jid) return ensureCanonical(jid);
+  } catch {}
+  // 3) Fallback: best-effort from current location
+  try {
+    const m2 = location.pathname.match(/\/jobs\/view\/(\d+)/);
+    if (m2 && m2[1]) return `https://www.linkedin.com/jobs/view/${m2[1]}/`;
+  } catch {}
+  return raw || '';
+}
+
 function extract(): CaptureEntry | null {
   // Try unified job card (right panel or dedicated page)
   const rightRoot = getRightPanelRoot();
@@ -123,17 +146,54 @@ function extract(): CaptureEntry | null {
   let companyText = qsText('.jobs-unified-top-card__company-name a, .jobs-unified-top-card__company-name, .topcard__org-name-link, .job-details-jobs-unified-top-card__primary-description a.app-aware-link', rightRoot);
   if (isPlaceholder(companyText)) companyText = '';
   let locationText = '';
-  const locCandidates = [
-    '.jobs-unified-top-card__bullet',
-    '.jobs-unified-top-card__subtitle-primary-grouping > span',
-    '.job-details-jobs-unified-top-card__primary-description',
-    '.top-card__flavor--bullet'
-  ];
-  for (const sel of locCandidates) {
-    const t = qsText(sel, rightRoot);
-    if (t && !/posted/i.test(t)) { locationText = t; break; }
+  let postedText = '';
+  let applicantsText: string | null = null;
+  let promotedByHirer = false;
+  let statusText: string | null = null;
+
+  // New robust parser: look for primary/tertiary description containers and split on bullets
+  const primary = rightRoot.querySelector('[class*="primary-description-container"]') as Element | null;
+  const tertiary = (primary?.querySelector('[class*="tertiary-description-container"]') as Element | null)
+    || (rightRoot.querySelector('[class*="tertiary-description-container"]') as Element | null);
+
+  if (tertiary) {
+    const seq = (tertiary.textContent || '').replace(/\s+/g, ' ').trim();
+    const parts = seq.split(/·/).map((s) => s.trim()).filter(Boolean);
+
+    // Location: first token that doesn't look like time/promoted/applicants/status
+    const locTok = parts.find((p) => !/(\bposted\b|\bapplicants?\b|\bago\b|just now|promoted by hirer|actively\b)/i.test(p));
+    if (locTok) locationText = locTok;
+
+    // Posted date: capture relative time including optional "Reposted"
+    const postedTok = parts.find((p) => /(just now|\d+\s+(minute|hour|day|week|month|year)s?\s+ago|reposted\s+\d+.*?ago)/i.test(p));
+    if (postedTok) {
+      const m = postedTok.match(/(just now|\d+\s+(minute|hour|day|week|month|year)s?\s+ago|reposted\s+\d+.*?ago)/i);
+      if (m) postedText = m[0];
+    }
+
+    // Applicants
+    const applTok = parts.find((p) => /applicants?/i.test(p));
+    if (applTok) applicantsText = applTok.match(/((over|more than)\s+)?[\d,]+/i)?.[0] || applTok;
+
+    // Promoted and status signals can appear outside bullet separators; scan the full sequence
+    promotedByHirer = /promoted by hirer/i.test(seq);
+    const statM = seq.match(/Actively reviewing applicants|Actively (hiring|recruiting)/i);
+    statusText = statM ? statM[0] : null;
   }
-  let postedText = qsText('.posted-time-ago__text, .jobs-unified-top-card__posted-date', rightRoot);
+
+  // Fallbacks for location/posted if the robust parser didn't resolve them
+  if (!locationText || !postedText) {
+    const locCandidates = [
+      '.jobs-unified-top-card__bullet',
+      '.jobs-unified-top-card__subtitle-primary-grouping > span',
+      '.top-card__flavor--bullet'
+    ];
+    for (const sel of locCandidates) {
+      const t = qsText(sel, rightRoot);
+      if (!locationText && t && !/posted/i.test(t)) { locationText = t; }
+    }
+    if (!postedText) postedText = qsText('.posted-time-ago__text, .jobs-unified-top-card__posted-date', rightRoot);
+  }
   let salaryTextRaw = qsText('.compensation__salary, [data-test-description*="salary" i]', rightRoot);
   let descText = qsText('.show-more-less-html__markup, .description__text, .jobs-description__content', rightRoot);
 
@@ -156,44 +216,7 @@ function extract(): CaptureEntry | null {
     if (!postedText && rel) postedText = rel;
   }
 
-  // New tertiary description container variant (spans with low-emphasis font). Order: Location, relative posted, applicants
-  if ((!locationText || !postedText) && rightRoot) {
-    const tertiary = rightRoot.querySelector('.job-details-jobs-unified-top-card__card__tertiary-description-container') as Element | null;
-    if (tertiary) {
-      const spanTexts = Array.from(tertiary.querySelectorAll('span'))
-        .map((n) => (n.textContent || '').trim())
-        .filter((t) => Boolean(t) && t !== '·' && t !== '•');
-      if (!locationText && spanTexts.length > 0) {
-        const locCand = spanTexts[0];
-        if (locCand) {
-          const cleaned = locCand.split('·')[0].trim().replace(/\s*\(.*?\)\s*$/, '');
-          if (cleaned) locationText = cleaned;
-        }
-      }
-      if (!postedText) {
-        const relCand = spanTexts.find((p) => /\b(\d+\s+)?(hour|day|week|month|year)s?\s+ago\b/i.test(p));
-        if (relCand) postedText = relCand;
-      }
-    }
-  }
-
-  // New variant: tertiary description container with tvm__text spans
-  if (!locationText || !postedText) {
-    const tertiary = rightRoot.querySelector('.job-details-jobs-unified-top-card__card__tertiary-description-container') as Element | null;
-    if (tertiary) {
-      const pieces = Array.from(tertiary.querySelectorAll('.tvm__text'))
-        .map((n) => (n.textContent || '').trim())
-        .filter(Boolean);
-      if (!locationText && pieces.length > 0) {
-        const loc = pieces[0].split('·')[0].trim().replace(/\s*\(.*?\)\s*$/, '');
-        if (loc) locationText = loc;
-      }
-      if (!postedText) {
-        const rel2 = pieces.find((p) => /\b(\d+\s+)?(hour|day|week|month|year)s?\s+ago\b/i.test(p));
-        if (rel2) postedText = rel2;
-      }
-    }
-  }
+  // Remove older brittle span-based blocks in favor of the robust parser above; keep only basic fallbacks
 
   // Fallback to active list item on search page (left column)
   if (!job_title || !companyText) {
@@ -235,6 +258,8 @@ function extract(): CaptureEntry | null {
     if (jid) job_posting_url = `https://www.linkedin.com/jobs/view/${jid}/`;
   }
   if (!job_posting_url) job_posting_url = location.href;
+  // Clean to canonical form https://www.linkedin.com/jobs/view/<jobId>/
+  job_posting_url = cleanLinkedInJobUrl(job_posting_url);
   let salary_text = '';
   if (/\$\s?\d|\d+\s?[-–]\s?\d+/.test(salaryTextRaw)) salary_text = salaryTextRaw;
   let job_timeline = '';
@@ -287,9 +312,12 @@ function showToast() {
 }
 
 function send(entry: CaptureEntry, shouldToast: boolean) {
-  chrome.runtime.sendMessage({ type: 'append-entry', entry }, (res) => {
+  chrome.runtime.sendMessage({ type: 'append-entry', entry }, undefined, (res) => {
     try { console.debug('[JobTracker][LinkedIn] send response', res); } catch {}
     if (shouldToast && res?.appended) showToast();
+    if (res && res.appended === false && (res.reason === 'inflight' || res.reason === 'seen')) {
+      try { console.debug('[JobTracker][LinkedIn] Already captured — skipped.'); } catch {}
+    }
   });
 }
 
@@ -304,7 +332,7 @@ let lastModalOpenAt = 0;
 
 async function init() {
   if (detachClick) return; // already initialized
-  chrome.runtime.sendMessage({ type: 'get-settings' }, (res) => {
+  chrome.runtime.sendMessage({ type: 'get-settings' }, undefined, (res) => {
     const settings = res?.settings || {};
     if (!settings.enableLinkedIn) return;
   // Capture both Easy Apply button on the page and buttons inside the modal
@@ -340,7 +368,11 @@ async function init() {
       const panel = document.querySelector('.jobs-unified-top-card, .jobs-unified-top-card__content--two-pane') as Element | null;
       lastCtxTitle = qsText('h1, .jobs-unified-top-card__job-title-string', panel || document);
       lastCtxCompany = qsText('.jobs-unified-top-card__company-name a, .jobs-unified-top-card__company-name, .topcard__org-name-link', panel || document);
-      extractAndSendWithRetries(!!settings.showToast);
+      // Debounce extraction to avoid duplicate appends from rapid modal changes
+      if (now - lastConfirmAt > 800) {
+        extractAndSendWithRetries(!!settings.showToast);
+        lastConfirmAt = now;
+      }
     }
   };
   window.addEventListener('click', clickHandler, { capture: true, passive: true });

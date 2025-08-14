@@ -12,11 +12,17 @@ export type CaptureEntry = {
   date_applied: string;
   job_title: string;
   company: string;
-  location: string;
+  // New optional fields for robust Sheets mapping; keep legacy fields for compatibility
+  location?: string;
   job_posting_url: string;
   salary_text: string;
+  // Legacy name kept for backwards compatibility
   listing_posted_date: string;
+  // New normalized relative posted text (e.g., "2 days ago")
+  posted_relative?: string;
   job_timeline: string;
+  // Stable record identifier for dedup/delete operations
+  record_id?: string;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
