@@ -53,25 +53,59 @@ function inferCompanyFromUrl(): string {
   return slug.charAt(0).toUpperCase() + slug.slice(1);
 }
 
+function cleanLeverUrl(): string {
+  try {
+    const u = new URL(location.href);
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (u.host.includes('jobs.lever.co') && parts.length >= 2) {
+      return `https://jobs.lever.co/${parts[0]}/${parts[1]}`;
+    }
+    return `${u.origin}${u.pathname}`;
+  } catch { return location.href; }
+}
+
+function textOr(el: Element | null): string { return (el?.textContent || '').trim(); }
+
 function extract(): CaptureEntry | null {
-  const job_title = bestText([
-    'h1',
-    '[data-qa="posting-name"]',
-    '.posting-header h2',
-    'h2'
-  ]);
-  let company = bestText(['.posting-header .company', '.company-name']);
+  // Title
+  const postingHeader = document.querySelector('.section.page-centered.posting-header, [class*="posting-header"]');
+  let job_title = textOr(postingHeader?.querySelector('h2'));
+  if (!job_title) job_title = bestText(['.posting-header h2', 'h2']);
+
+  // Company: prefer header brand anchor or visible text; fall back to URL slug
+  let company = '';
+  const brandA = document.querySelector('a.main-header-logo, a[class*="header-logo" i]') as HTMLAnchorElement | null;
+  if (brandA) {
+    const alt = (brandA.querySelector('img')?.getAttribute('alt') || '').replace(/\s*logo\s*$/i, '').trim();
+    const t = (brandA.textContent || '').replace(/\s*logo\s*$/i, '').trim();
+    company = alt || t;
+  }
   if (!company) company = inferCompanyFromUrl();
-  const location = bestText(['[data-qa="posting-location"]', '.sort-by-time posting-categories .location', '.posting-categories .location', '.location']);
-  const posted = bestText(['[data-qa="posting-posted-date"]']);
-  const job_posting_url = location.href.split('?')[0];
-  let salary_text = '';
-  const pageText = (document.body?.innerText || '').slice(0, 20000);
-  const salaryMatch = pageText.match(/\$\s?\d[\d,]*(?:\s?[kK])?(?:\s?[-–]\s?\$?\d[\d,]*(?:\s?[kK])?)?/);
-  if (salaryMatch) salary_text = salaryMatch[0];
-  let job_timeline = '';
-  const tl = pageText.match(/([A-Z][a-z]{2})\s+\d{1,2}(st|nd|rd|th)?\s+\d{4}\s+[-–]\s+([A-Z][a-z]{2})\s+\d{1,2}(st|nd|rd|th)?\s+\d{4}/);
-  if (tl) job_timeline = tl[0];
+
+  // Categories: location, department, commitment, workplaceTypes
+  const cats = postingHeader?.querySelector('.posting-categories') || document.querySelector('.posting-categories');
+  const locRaw = textOr(cats?.querySelector('.location, [class*="location" i]'));
+  const department = textOr(cats?.querySelector('.department, [class*="department" i]'));
+  const commitment = textOr(cats?.querySelector('.commitment, [class*="commitment" i]'));
+  const workplaceRaw = textOr(cats?.querySelector('.workplaceTypes, [class*="workplacetypes" i], [class*="workplace" i]'));
+
+  const normalizeTrailing = (s: string) => s.replace(/\s*\/+\s*$/,'').trim();
+  const normalizeWorkplace = (s: string) => {
+    const t = s.toLowerCase();
+    if (!t) return '';
+    if (t.includes('remote')) return 'Remote';
+    if (t.includes('hybrid')) return 'Hybrid';
+    if (t.includes('on-site') || t.includes('on site')) return 'On-site';
+    return s.trim();
+  };
+  const commitmentClean = normalizeTrailing(commitment);
+  const workplace = normalizeWorkplace(workplaceRaw);
+  const locClean = normalizeTrailing(locRaw);
+  const location = workplace ? (locClean ? `${locClean}, (${workplace})` : `(${workplace})`) : locClean;
+  const job_timeline = commitmentClean;
+
+  // URL
+  const job_posting_url = cleanLeverUrl();
 
   if (!job_title || !company) return null;
   return {
@@ -80,14 +114,14 @@ function extract(): CaptureEntry | null {
     company,
     location,
     job_posting_url,
-    salary_text,
-    listing_posted_date: posted,
+    salary_text: '',
+    listing_posted_date: '',
     job_timeline
   };
 }
 
 function send(entry: CaptureEntry, shouldToast: boolean) {
-  chrome.runtime.sendMessage({ type: 'append-entry', entry }, (res) => {
+  chrome.runtime.sendMessage({ type: 'append-entry', entry }, undefined, (res) => {
     if (shouldToast && res?.appended) {
       const d = document.createElement('div');
       d.textContent = 'Job added to Google Sheet ✓';
@@ -101,12 +135,18 @@ function send(entry: CaptureEntry, shouldToast: boolean) {
 let detachClick: (() => void) | null = null;
 let mo: MutationObserver | null = null;
 
+let lastClickAt = 0;
+
 function init() {
   if (detachClick) return;
-  chrome.runtime.sendMessage({ type: 'get-settings' }, (res) => {
+  chrome.runtime.sendMessage({ type: 'get-settings' }, undefined, (res) => {
     const settings = res?.settings || {};
     if (!settings.enableGeneric) return; // piggyback on generic toggle
+    // Capture submit button clicks
     detachClick = onAnyApplyClick(() => {
+      const now = Date.now();
+      if (now - lastClickAt < 1000) return; // debounce
+      lastClickAt = now;
       const entry = extract();
       if (entry) send(entry, !!settings.showToast);
     });

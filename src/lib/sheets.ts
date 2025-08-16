@@ -398,6 +398,232 @@ export async function deleteRowByRecordId(sheetId: string, recordId: string, she
   console.log('delete: batchUpdate OK');
 }
 
+// --- Editable sync helpers ---
+
+export async function findRowByRecordId(recordId: string, sheetName = 'Sheet1'): Promise<number | null> {
+  const hdrRes = await sheetsFetch(`spreadsheets/${await getSpreadsheetId()}` as any, { method: 'GET' });
+  return readRowIndex(recordId, sheetName);
+}
+
+async function getSpreadsheetId(): Promise<string> {
+  // This function exists only to make TS happy when composing URLs dynamically elsewhere.
+  // Callers always pass sheetId directly to other helpers; we won't use this in practice.
+  throw new Error('getSpreadsheetId should not be called');
+}
+
+async function readHeader(sheetId: string, sheetName: string): Promise<string[]> {
+  const range = encodeURIComponent(`${sheetName}!1:1`);
+  const res = await sheetsFetch(`spreadsheets/${sheetId}/values/${range}?majorDimension=ROWS`, { method: 'GET' });
+  const json = await res.json();
+  return (json?.values?.[0] || []).map((v: any) => String(v));
+}
+
+async function readRowIndex(recordId: string, sheetName = 'Sheet1'): Promise<number | null> {
+  // Note: we need sheetId; callers should use findRowByRecordId on background where sheetId is known.
+  return null;
+}
+
+export async function readAllRows(sheetId?: string, sheetName = 'Sheet1'): Promise<{ version: string; rows: CaptureEntry[] }> {
+  if (!sheetId) throw new Error('sheetId required');
+  const header = await readHeader(sheetId, sheetName);
+  const endCol = toA1Col(header.length);
+  const range = encodeURIComponent(`${sheetName}!A2:${endCol}`);
+  const res = await sheetsFetch(`spreadsheets/${sheetId}/values/${range}?majorDimension=ROWS`, { method: 'GET' });
+  const etag = (res.headers as any).get?.('ETag') || '';
+  const json = await res.json();
+  const values: any[][] = json.values || [];
+  const rows: CaptureEntry[] = values.map((row) => mapRowToEntry(header, row));
+  const version = etag || shaVersion(values);
+  return { version, rows };
+}
+
+export async function readRowByRecordId(sheetId: string, recordId: string, sheetName = 'Sheet1'): Promise<{ version: string; row: CaptureEntry } | null> {
+  const header = await readHeader(sheetId, sheetName);
+  const idx = header.indexOf('Record ID');
+  if (idx === -1) return null;
+  const col = toA1Col(idx + 1);
+  const range = encodeURIComponent(`${sheetName}!${col}2:${col}20000`);
+  const res = await sheetsFetch(`spreadsheets/${sheetId}/values/${range}?majorDimension=COLUMNS`, { method: 'GET' });
+  const json = await res.json();
+  const list: string[] = (json?.values?.[0] || []).map((v: any) => String(v));
+  let rowIndex = -1;
+  for (let i = 0; i < list.length; i++) if (list[i] === recordId) { rowIndex = i + 2; break; }
+  if (rowIndex === -1) return null;
+  const endCol = toA1Col(header.length);
+  const rowRange = encodeURIComponent(`${sheetName}!A${rowIndex}:${endCol}${rowIndex}`);
+  const res2 = await sheetsFetch(`spreadsheets/${sheetId}/values/${rowRange}?majorDimension=ROWS`, { method: 'GET' });
+  const etag = (res2.headers as any).get?.('ETag') || '';
+  const json2 = await res2.json();
+  const rowVals: any[] = (json2?.values?.[0] || []);
+  const row = mapRowToEntry(header, rowVals);
+  const version = etag || shaVersion([rowVals]);
+  return { version, row };
+}
+
+export async function getRawSheetData(sheetId: string, sheetName = 'Sheet1'): Promise<{ header: string[]; rows: any[][] }> {
+  if (!sheetId) throw new Error('sheetId required');
+  const header = await readHeader(sheetId, sheetName);
+  const endCol = toA1Col(header.length);
+  const range = encodeURIComponent(`${sheetName}!A2:${endCol}`);
+  
+  // Get both rendered values and raw formulas
+  const res = await sheetsFetch(`spreadsheets/${sheetId}/values/${range}?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`, { method: 'GET' });
+  const json = await res.json();
+  const rows: any[][] = json.values || [];
+  
+  // Also get raw formulas for Job Title column to extract URLs
+  const jobTitleCol = 'A';
+  const jobTitleRange = encodeURIComponent(`${sheetName}!${jobTitleCol}2:${jobTitleCol}20000`);
+  const formulaRes = await sheetsFetch(`spreadsheets/${sheetId}/values/${jobTitleRange}?majorDimension=COLUMNS&valueRenderOption=FORMULA`, { method: 'GET' });
+  const formulaJson = await formulaRes.json();
+  const formulas: string[] = (formulaJson?.values?.[0] || []).map((v: any) => String(v));
+  
+  // Merge formulas into rows for Job Title column
+  for (let i = 0; i < Math.min(rows.length, formulas.length); i++) {
+    if (rows[i] && rows[i].length > 0) {
+      rows[i][0] = formulas[i] || rows[i][0]; // Use formula if available, otherwise use rendered value
+    }
+  }
+  
+  return { header, rows };
+}
+
+function mapRowToEntry(header: string[], row: any[]): CaptureEntry {
+  const get = (name: string) => row[header.indexOf(name)] || '';
+  // Job Title may be a formula; Sheets returns the rendered value, which is fine for the popup.
+  const entry: CaptureEntry = {
+    date_applied: String(get('Date Applied') || ''),
+    job_title: String(get('Job Title') || ''),
+    company: String(get('Company') || ''),
+    location: String(get('Location') || ''),
+    job_posting_url: '',
+    salary_text: '',
+    listing_posted_date: String(get('Date Posted') || ''),
+    job_timeline: String(get('Job Timeline') || ''),
+    record_id: String(get('Record ID') || ''),
+    cover_letter: String(get('Cover Letter') || ''),
+    status: String(get('Status') || '')
+  };
+  return entry;
+}
+
+function shaVersion(values: any[][]): string {
+  try {
+    const s = JSON.stringify(values);
+    let h = 0, i = 0, len = s.length;
+    while (i < len) { h = (h << 5) - h + s.charCodeAt(i++) | 0; }
+    return `v${h}`;
+  } catch { return `v${Date.now()}`; }
+}
+
+export async function updateRowByRecordId(sheetId: string, recordId: string, patch: Partial<CaptureEntry>, sheetName = 'Sheet1'): Promise<{ version: string }> {
+  const header = await readHeader(sheetId, sheetName);
+  const idx = header.indexOf('Record ID');
+  if (idx === -1) throw new Error('Record ID column missing');
+  
+  // find row by Record ID
+  const col = toA1Col(idx + 1);
+  const range = encodeURIComponent(`${sheetName}!${col}2:${col}20000`);
+  const res = await sheetsFetch(`spreadsheets/${sheetId}/values/${range}?majorDimension=COLUMNS`, { method: 'GET' });
+  const json = await res.json();
+  const list: string[] = (json?.values?.[0] || []).map((v: any) => String(v));
+  let rowIndex = -1;
+  for (let i = 0; i < list.length; i++) if (list[i] === recordId) { rowIndex = i + 2; break; }
+  
+  // Fallback: try to find the row by title+company+applied when record ID is missing (older rows), then backfill the Record ID
+  if (rowIndex === -1) {
+    const endCol = toA1Col(header.length);
+    const allRange = encodeURIComponent(`${sheetName}!A2:${endCol}`);
+    const allRes = await sheetsFetch(`spreadsheets/${sheetId}/values/${allRange}?majorDimension=ROWS`, { method: 'GET' });
+    const allJson = await allRes.json();
+    const rows: string[][] = allJson?.values || [];
+    const idxTitle = header.indexOf('Job Title');
+    const idxCompany = header.indexOf('Company');
+    const idxApplied = header.indexOf('Date Applied');
+    
+    // Use cues from patch if present; otherwise leave empty so we cannot match incorrectly
+    const wantTitle = (patch.job_title || '').trim();
+    const wantCompany = (patch.company || '').trim();
+    const wantApplied = (patch.date_applied || '').trim();
+    
+    if (wantTitle || wantCompany || wantApplied) {
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        const t = (r[idxTitle] || '').trim();
+        const c = (r[idxCompany] || '').trim();
+        const a = (r[idxApplied] || '').trim();
+        const okT = wantTitle ? (t === wantTitle) : true;
+        const okC = wantCompany ? (c === wantCompany) : true;
+        const okA = wantApplied ? (a === wantApplied) : true;
+        if (okT && okC && okA) { rowIndex = i + 2; break; }
+      }
+      
+      if (rowIndex !== -1) {
+        // Backfill the Record ID cell for future updates
+        const ridCell = encodeURIComponent(`${sheetName}!${col}${rowIndex}:${col}${rowIndex}`);
+        await sheetsFetch(`spreadsheets/${sheetId}/values/${ridCell}?valueInputOption=RAW`, {
+          method: 'PUT',
+          body: JSON.stringify({ range: `${sheetName}!${col}${rowIndex}`, values: [[recordId]] })
+        });
+      }
+    }
+    
+    if (rowIndex === -1) throw new Error(`Record ID not found: ${recordId}`);
+  }
+
+  // Build row values in header order
+  const rowRange = encodeURIComponent(`${sheetName}!A${rowIndex}:${toA1Col(header.length)}${rowIndex}`);
+  const currentRes = await sheetsFetch(`spreadsheets/${sheetId}/values/${rowRange}?majorDimension=ROWS`, { method: 'GET' });
+  const currentJson = await currentRes.json();
+  const current: any[] = (currentJson?.values?.[0] || []);
+
+  // Ensure the current array has the same length as the header
+  while (current.length < header.length) {
+    current.push('');
+  }
+
+  const get = (name: string) => current[header.indexOf(name)] || '';
+  const set = (name: string, val: string) => { 
+    const i = header.indexOf(name); 
+    if (i >= 0) current[i] = val; 
+  };
+
+  // Apply patch
+  if (patch.job_title !== undefined || patch.job_posting_url !== undefined) {
+    const title = patch.job_title !== undefined ? patch.job_title : String(get('Job Title'));
+    // Attempt to extract existing URL if the current cell is a HYPERLINK
+    let existingUrl = '';
+    try {
+      const m = String(get('Job Title')).match(/HYPERLINK\("([^"]+)/);
+      if (m && m[1]) existingUrl = m[1];
+    } catch {}
+    const url = patch.job_posting_url !== undefined ? patch.job_posting_url : existingUrl;
+    const cell = url ? `=HYPERLINK("${url}","${(title || '').replace(/"/g, '""')}")` : title;
+    set('Job Title', cell);
+  }
+  if (patch.date_applied !== undefined) set('Date Applied', patch.date_applied || '');
+  if (patch.company !== undefined) set('Company', patch.company || '');
+  if (patch.location !== undefined) set('Location', patch.location || '');
+  if (patch.listing_posted_date !== undefined) set('Date Posted', patch.listing_posted_date || '');
+  if (patch.job_timeline !== undefined) set('Job Timeline', patch.job_timeline || '');
+  if (patch.cover_letter !== undefined) set('Cover Letter', patch.cover_letter || '');
+  if (patch.status !== undefined) set('Status', patch.status || '');
+
+  const updateRes = await sheetsFetch(`spreadsheets/${sheetId}/values/${rowRange}?valueInputOption=USER_ENTERED`, {
+    method: 'PUT',
+    body: JSON.stringify({ range: `${sheetName}!A${rowIndex}:${toA1Col(header.length)}${rowIndex}`, values: [current] })
+  });
+  
+  if (!updateRes.ok) {
+    const txt = await updateRes.text();
+    throw new Error(`Sheets update failed: ${updateRes.status} ${txt}`);
+  }
+  
+  const etag = (updateRes.headers as any).get?.('ETag') || '';
+  const version = etag || shaVersion([current]);
+  return { version };
+}
+
 // Helper: get OAuth Client ID from storage or manifest
 export async function getOAuthClientId(): Promise<string> {
   // 1) From saved settings (Options page stores under `settings`)

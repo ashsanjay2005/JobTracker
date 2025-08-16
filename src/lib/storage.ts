@@ -23,6 +23,9 @@ export type CaptureEntry = {
   job_timeline: string;
   // Stable record identifier for dedup/delete operations
   record_id?: string;
+  // User-editable fields mirrored from Sheet
+  cover_letter?: string; // 'Not set' | 'Yes' | 'No'
+  status?: string; // 'Applied' | 'Interviewing' | 'Accepted' | 'Rejected' | 'Withdrawn'
 };
 
 export const DEFAULT_SETTINGS: Settings = {
