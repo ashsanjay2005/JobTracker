@@ -9,7 +9,6 @@ type Settings = {
   enableOracleTaleo: boolean;
   enableGeneric: boolean;
   showToast: boolean;
-  oauthClientId?: string;
 };
 
 function App() {
@@ -53,11 +52,7 @@ function App() {
         <input value={settings.sheetId} onChange={(e) => setSettings({ ...settings, sheetId: e.target.value })} className="w-full border rounded px-3 py-2" placeholder="1abcDEF..." />
         <p className="text-xs text-gray-600">The ID in `https://docs.google.com/spreadsheets/d/ID/edit`</p>
       </div>
-      <div className="space-y-2">
-        <label className="block text-sm font-medium">Google OAuth Client ID (optional)</label>
-        <input value={settings.oauthClientId || ''} onChange={(e) => setSettings({ ...settings, oauthClientId: e.target.value })} className="w-full border rounded px-3 py-2" placeholder="1234567890-abcdef.apps.googleusercontent.com" />
-        <p className="text-xs text-gray-600">If empty, uses the `oauth2.client_id` in `manifest.json`.</p>
-      </div>
+      
       <div className="grid grid-cols-2 gap-4">
         <label className="flex items-center space-x-2"><input type="checkbox" checked={settings.enableLinkedIn} onChange={(e) => setSettings({ ...settings, enableLinkedIn: e.target.checked })} /><span>LinkedIn</span></label>
         <label className="flex items-center space-x-2"><input type="checkbox" checked={settings.enableWorkday} onChange={(e) => setSettings({ ...settings, enableWorkday: e.target.checked })} /><span>Workday</span></label>

@@ -28,7 +28,8 @@ export async function ensureAuthToken(interactive = true): Promise<string> {
   if (existing) return existing.accessToken;
   if (AUTH_IN_FLIGHT) return AUTH_IN_FLIGHT;
   AUTH_IN_FLIGHT = (async () => {
-    const clientId = await getOAuthClientId();
+    const manifest = chrome.runtime.getManifest();
+    const clientId = manifest.oauth2?.client_id as string;
     const redirectUri = chrome.identity.getRedirectURL('oauth2');
     console.log('OAuth client_id in use:', clientId);
     console.log('Using redirect_uri:', redirectUri);
@@ -624,24 +625,6 @@ export async function updateRowByRecordId(sheetId: string, recordId: string, pat
   return { version };
 }
 
-// Helper: get OAuth Client ID from storage or manifest
-export async function getOAuthClientId(): Promise<string> {
-  // 1) From saved settings (Options page stores under `settings`)
-  try {
-    const settings = await getSettings();
-    if (settings?.oauthClientId && settings.oauthClientId.trim()) {
-      return settings.oauthClientId.trim();
-    }
-  } catch {}
-  // 2) Legacy: top-level key (if any)
-  const fromStorage = await new Promise<string | undefined>((resolve) => {
-    chrome.storage.sync.get(['oauthClientId'], (res) => resolve((res as any)?.oauthClientId));
-  });
-  if (fromStorage && fromStorage.trim()) return fromStorage.trim();
-  // 3) Manifest fallback
-  const manifest = chrome.runtime.getManifest() as any;
-  const fromManifest = manifest?.oauth2?.client_id;
-  return (fromManifest || '').trim();
-}
+
 
 

@@ -5,7 +5,6 @@ export type Settings = {
   enableOracleTaleo: boolean;
   enableGeneric: boolean;
   showToast: boolean;
-  oauthClientId?: string; // optional override if not using manifest oauth2.client_id
 };
 
 export type CaptureEntry = {
@@ -39,7 +38,13 @@ export const DEFAULT_SETTINGS: Settings = {
 
 export async function getSettings(): Promise<Settings> {
   const res = await chrome.storage.sync.get(['settings']);
-  return { ...DEFAULT_SETTINGS, ...(res.settings || {}) } as Settings;
+  const settings = res.settings || {};
+  // Migration: remove old oauthClientId if it exists
+  if (settings.oauthClientId) {
+    delete settings.oauthClientId;
+    chrome.storage.sync.set({ settings });
+  }
+  return { ...DEFAULT_SETTINGS, ...settings } as Settings;
 }
 
 export async function saveSettings(settings: Partial<Settings>): Promise<void> {
