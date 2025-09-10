@@ -25,15 +25,252 @@ type Entry = {
   _rowIndex?: number;
 };
 
-type Tab = 'dashboard' | 'captures' | 'sites' | 'settings' | 'debug';
+type Tab = 'overview' | 'dashboard' | 'settings';
 
 // Helper Components
 const Card: React.FC<{ title: string; value: string; className?: string }> = ({ title, value, className = '' }) => (
-  <div className={`bg-gray-800 rounded-lg p-4 ${className}`}>
+  <div className={`bg-gray-800 rounded-lg p-4 ${className}`} role="region" aria-label={`${title}: ${value}`}>
     <div className="text-sm text-gray-400">{title}</div>
     <div className="text-2xl font-semibold mt-1">{value}</div>
   </div>
 );
+
+// Utility functions
+const formatDomain = (url: string): string => {
+  try {
+    const domain = new URL(url).hostname;
+    return domain.replace('www.', '');
+  } catch {
+    return 'Unknown';
+  }
+};
+
+const isInLastDays = (dateStr: string, days: number): boolean => {
+  try {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffTime = now.getTime() - date.getTime();
+    const diffDays = diffTime / (1000 * 60 * 60 * 24);
+    return diffDays <= days;
+  } catch {
+    return false;
+  }
+};
+
+const normalizeStatus = (status: string | undefined): string => {
+  if (!status) return 'Applied';
+  const normalized = status.toLowerCase().trim();
+  const statusMap: Record<string, string> = {
+    'applied': 'Applied',
+    'interviewing': 'Interviewing',
+    'accepted': 'Accepted',
+    'rejected': 'Rejected',
+    'withdrawn': 'Withdrawn'
+  };
+  return statusMap[normalized] || 'Applied';
+};
+
+// Custom hook for application statistics
+const useApplicationStats = (allEntries: Entry[]) => {
+  return React.useMemo(() => {
+    const totals = {
+      total: allEntries.length,
+      applied: 0,
+      interviewing: 0,
+      accepted: 0,
+      rejected: 0,
+      withdrawn: 0
+    };
+
+    const activity = {
+      last7: 0,
+      last30: 0,
+      last90: 0
+    };
+
+    const sourceCounts: Record<string, number> = {};
+
+    allEntries.forEach(entry => {
+      // Count by status
+      const status = normalizeStatus(entry.status);
+      totals[status.toLowerCase() as keyof typeof totals]++;
+
+      // Count by activity
+      if (entry.date_applied) {
+        if (isInLastDays(entry.date_applied, 7)) activity.last7++;
+        if (isInLastDays(entry.date_applied, 30)) activity.last30++;
+        if (isInLastDays(entry.date_applied, 90)) activity.last90++;
+      }
+
+      // Count by source
+      if (entry.job_posting_url) {
+        const domain = formatDomain(entry.job_posting_url);
+        sourceCounts[domain] = (sourceCounts[domain] || 0) + 1;
+      }
+    });
+
+    const topSources = Object.entries(sourceCounts)
+      .map(([domain, count]) => ({ domain, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 3);
+
+    return {
+      totals,
+      funnel: totals, // Same data for funnel
+      activity,
+      topSources,
+      loading: false
+    };
+  }, [allEntries]);
+};
+
+// Overview Tab Component
+const OverviewTab: React.FC<{ allEntries: Entry[] }> = ({ allEntries }) => {
+  const stats = useApplicationStats(allEntries);
+
+  if (stats.totals.total === 0) {
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold">Application Overview</h2>
+        <div className="bg-gray-800 rounded-2xl p-6 text-center">
+          <p className="text-gray-300">No applications yet—your first one will appear here.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const totalCount = stats.totals.total;
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold">Application Overview</h2>
+      
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <Card title="Total" value={stats.totals.total.toString()} />
+        <Card title="Applied" value={stats.totals.applied.toString()} />
+        <Card title="Interviewing" value={stats.totals.interviewing.toString()} />
+        <Card title="Accepted" value={stats.totals.accepted.toString()} />
+        <Card title="Rejected" value={stats.totals.rejected.toString()} />
+        <Card title="Withdrawn" value={stats.totals.withdrawn.toString()} />
+      </div>
+
+      {/* Funnel Visualization */}
+      <div className="bg-gray-800 rounded-2xl p-6">
+        <h3 className="text-lg font-semibold mb-4">Application Funnel</h3>
+        <div className="space-y-3">
+          {/* Applied → Interviewing → Accepted */}
+          <div className="flex items-center space-x-4">
+            <div className="w-20 text-sm text-gray-400">Applied</div>
+            <div className="flex-1 bg-gray-700 rounded-full h-4 relative">
+              <div 
+                className="bg-blue-500 h-4 rounded-full transition-all duration-300"
+                style={{ width: `${totalCount > 0 ? (stats.totals.applied / totalCount) * 100 : 0}%` }}
+              />
+              <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white">
+                {stats.totals.applied}
+              </span>
+            </div>
+          </div>
+          
+          <div className="flex items-center space-x-4">
+            <div className="w-20 text-sm text-gray-400">Interviewing</div>
+            <div className="flex-1 bg-gray-700 rounded-full h-4 relative">
+              <div 
+                className="bg-yellow-500 h-4 rounded-full transition-all duration-300"
+                style={{ width: `${totalCount > 0 ? (stats.totals.interviewing / totalCount) * 100 : 0}%` }}
+              />
+              <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white">
+                {stats.totals.interviewing}
+              </span>
+            </div>
+          </div>
+          
+          <div className="flex items-center space-x-4">
+            <div className="w-20 text-sm text-gray-400">Accepted</div>
+            <div className="flex-1 bg-gray-700 rounded-full h-4 relative">
+              <div 
+                className="bg-green-500 h-4 rounded-full transition-all duration-300"
+                style={{ width: `${totalCount > 0 ? (stats.totals.accepted / totalCount) * 100 : 0}%` }}
+              />
+              <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white">
+                {stats.totals.accepted}
+              </span>
+            </div>
+          </div>
+          
+          {/* Terminal states */}
+          <div className="flex items-center space-x-4">
+            <div className="w-20 text-sm text-gray-400">Rejected</div>
+            <div className="flex-1 bg-gray-700 rounded-full h-4 relative">
+              <div 
+                className="bg-red-500 h-4 rounded-full transition-all duration-300"
+                style={{ width: `${totalCount > 0 ? (stats.totals.rejected / totalCount) * 100 : 0}%` }}
+              />
+              <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white">
+                {stats.totals.rejected}
+              </span>
+            </div>
+          </div>
+          
+          <div className="flex items-center space-x-4">
+            <div className="w-20 text-sm text-gray-400">Withdrawn</div>
+            <div className="flex-1 bg-gray-700 rounded-full h-4 relative">
+              <div 
+                className="bg-gray-500 h-4 rounded-full transition-all duration-300"
+                style={{ width: `${totalCount > 0 ? (stats.totals.withdrawn / totalCount) * 100 : 0}%` }}
+              />
+              <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white">
+                {stats.totals.withdrawn}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Activity and Top Sources */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Activity Chips */}
+        <div className="bg-gray-800 rounded-2xl p-6">
+          <h3 className="text-lg font-semibold mb-4">Recent Activity</h3>
+          <div className="flex flex-wrap gap-2">
+            <div className="bg-blue-900 text-blue-100 px-3 py-1 rounded-full text-sm">
+              Last 7 days: {stats.activity.last7}
+            </div>
+            <div className="bg-blue-900 text-blue-100 px-3 py-1 rounded-full text-sm">
+              Last 30 days: {stats.activity.last30}
+            </div>
+            <div className="bg-blue-900 text-blue-100 px-3 py-1 rounded-full text-sm">
+              Last 90 days: {stats.activity.last90}
+            </div>
+          </div>
+        </div>
+
+        {/* Top Sources */}
+        <div className="bg-gray-800 rounded-2xl p-6">
+          <h3 className="text-lg font-semibold mb-4">Top Sources</h3>
+          {stats.topSources.length > 0 ? (
+            <div className="space-y-2">
+              {stats.topSources.map((source, index) => (
+                <div key={source.domain} className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center text-xs font-medium">
+                      {source.domain.charAt(0).toUpperCase()}
+                    </div>
+                    <span className="text-sm">{source.domain}</span>
+                  </div>
+                  <span className="text-sm text-gray-400">{source.count}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-gray-400 text-sm">No source data available</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const Checkbox: React.FC<{ 
   checked: boolean; 
@@ -74,9 +311,9 @@ function App() {
     });
   }, []);
 
-  // Load all entries when dashboard tab is active
+  // Load all entries when dashboard or overview tab is active
   React.useEffect(() => {
-    if (activeTab === 'dashboard') {
+    if (activeTab === 'dashboard' || activeTab === 'overview') {
       loadAllEntries();
     }
   }, [activeTab]);
@@ -215,13 +452,19 @@ function App() {
     const btn = document.activeElement as HTMLButtonElement | null;
     if (btn) btn.disabled = true;
     
+    // Optimistic UI: Remove from UI immediately
+    const currentList = [...allEntries];
+    const filtered = currentList.filter((e) => (e.record_id || '') !== (rec.record_id || ''));
+    setAllEntries(filtered);
+    setStatus('Entry deleted successfully');
+    setTimeout(() => setStatus(null), 2000);
+    
+    // Do background deletion
     chrome.runtime.sendMessage({ type: 'delete-record', recordId: rec.record_id }, (res) => {
-      if (res?.ok) {
-        setAllEntries((prev) => prev.filter((e) => (e.record_id || '') !== (rec.record_id || '')));
-        setStatus('Entry deleted successfully');
-        setTimeout(() => setStatus(null), 2000);
-      } else {
-        setStatus('Delete failed — try again');
+      if (!res?.ok) {
+        // If deletion failed, restore the entry
+        setAllEntries(currentList);
+        setStatus('Delete failed — entry restored');
         setTimeout(() => setStatus(null), 3000);
       }
       if (btn) btn.disabled = false;
@@ -254,13 +497,8 @@ function App() {
     }
   };
 
-  const getOAuthClientId = () => {
-    const manifest = chrome.runtime.getManifest() as any;
-    const clientId = manifest?.oauth2?.client_id || '';
-    return clientId.length > 6 ? `...${clientId.slice(-6)}` : clientId;
-  };
 
-  // Filter and sort entries
+  // Filter and sort entries - use same logic as popup
   const filteredAndSortedEntries = React.useMemo(() => {
     let filtered = allEntries.filter(entry => {
       // Status filter
@@ -281,17 +519,14 @@ function App() {
       return true;
     });
 
-    // Sort entries
-    filtered.sort((a, b) => {
-      const dateA = new Date(a.date_applied || '');
-      const dateB = new Date(b.date_applied || '');
-      
-      if (sortBy === 'newest') {
-        return dateB.getTime() - dateA.getTime();
-      } else {
-        return dateA.getTime() - dateB.getTime();
-      }
-    });
+    // Apply sorting based on sortBy option
+    if (sortBy === 'newest') {
+      // Newest first: reverse the array (same as popup logic)
+      filtered = filtered.reverse();
+    } else if (sortBy === 'oldest') {
+      // Oldest first: keep original order (bottom to top from sheet = oldest to newest)
+      // No change needed - filtered is already in oldest to newest order
+    }
 
     return filtered;
   }, [allEntries, statusFilter, searchQuery, sortBy]);
@@ -301,11 +536,9 @@ function App() {
   if (!settings) return <div className="p-6">Loading…</div>;
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'captures', label: 'Captures' },
-    { id: 'sites', label: 'Sites' },
-    { id: 'settings', label: 'Settings' },
-    { id: 'debug', label: 'Debug' }
+    { id: 'overview', label: 'Overview' },
+    { id: 'dashboard', label: 'Captures' },
+    { id: 'settings', label: 'Settings' }
   ];
 
   return (
@@ -340,6 +573,11 @@ function App() {
           <div className="mb-4 p-3 bg-emerald-900 text-emerald-100 rounded-md text-sm">
             {status}
           </div>
+        )}
+
+        {/* Overview Tab */}
+        {activeTab === 'overview' && (
+          <OverviewTab allEntries={allEntries} />
         )}
 
         {/* Dashboard Tab */}
@@ -549,25 +787,6 @@ function App() {
           </div>
         )}
 
-        {/* Captures Tab */}
-        {activeTab === 'captures' && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-bold">Captures</h2>
-            <div className="bg-gray-800 rounded-lg p-6">
-              <p className="text-gray-300">Captures log coming soon</p>
-            </div>
-          </div>
-        )}
-
-        {/* Sites Tab */}
-        {activeTab === 'sites' && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-bold">Sites</h2>
-            <div className="bg-gray-800 rounded-lg p-6">
-              <p className="text-gray-300">Per-site toggles and allow/block lists coming soon</p>
-            </div>
-          </div>
-        )}
 
         {/* Settings Tab */}
         {activeTab === 'settings' && (
@@ -637,32 +856,6 @@ function App() {
           </div>
         )}
 
-        {/* Debug Tab */}
-        {activeTab === 'debug' && (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-bold">Debug</h2>
-            
-            <div className="bg-gray-800 rounded-lg p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">OAuth Client ID</label>
-                <input
-                  value={getOAuthClientId()}
-                  readOnly
-                  className="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white"
-                />
-      </div>
-      
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-2">Sheet ID</label>
-                <input
-                  value={settings.sheetId || 'Not set'}
-                  readOnly
-                  className="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white"
-                />
-              </div>
-            </div>
-      </div>
-        )}
       </div>
     </div>
   );

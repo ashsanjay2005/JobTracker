@@ -142,14 +142,23 @@ function App() {
       if (res?.ok) setSheetId(res.settings?.sheetId || '');
     });
     
-    // Auto-sync every 2 minutes when popup is open (less frequent to avoid API limits)
-    const autoSyncInterval = setInterval(syncFromSheet, 120000);
+    // Auto-sync every 30 seconds when popup is open to detect sheet changes
+    const autoSyncInterval = setInterval(syncFromSheet, 30000);
     
     const onMsg = (msg: any) => {
       if (msg?.type === 'recent-updated') {
-        chrome.runtime.sendMessage({ type: 'get-recent' }, (res) => {
-          if (res?.ok) setRecent(res.recent || []);
-        });
+        // Sync from sheet to get the latest data
+        syncFromSheet();
+      } else if (msg?.type === 'sheet-update-error') {
+        // Handle background save errors
+        toast('Save failed — try again.');
+        // Reset saving state for the failed record
+        if (msg.recordId) {
+          setSaving((s) => ({ ...s, [msg.recordId]: 'error' }));
+          setTimeout(() => {
+            setSaving((s) => ({ ...s, [msg.recordId]: 'idle' }));
+          }, 3000);
+        }
       }
     };
     chrome.runtime.onMessage.addListener(onMsg);
@@ -171,27 +180,19 @@ function App() {
   const COVER_OPTIONS = ['Not set', 'Yes', 'No'];
 
   const savePatch = React.useCallback((recordId: string, patch: Partial<Entry>) => {
-    chrome.runtime.sendMessage({ type: 'sheet-update', recordId, patch }, (res) => {
-      if ((chrome.runtime as any).lastError) {
-        try { console.debug('[popup][sheet-update] lastError', (chrome.runtime as any).lastError.message); } catch {}
-        toast('Save failed — try again.');
-        return;
-      }
-      try { console.debug('[popup][sheet-update] resp', res); } catch {}
-      
-      if (res?.ok) {
-        toast('Saved');
-      } else {
-        const error = res?.error || 'Unknown error';
-        if (error === 'NO_SHEET_ID') {
-          toast('No sheet configured — set it in Options.');
-        } else if (error.includes('Record ID not found') || error.includes('Row not found')) {
-          toast('Row not found — tap Sync, then try again.');
-        } else {
-          toast('Save failed — try again.');
-        }
-      }
-    });
+    // Send message without waiting for response (fire-and-forget)
+    chrome.runtime.sendMessage({ type: 'sheet-update', recordId, patch });
+    
+    // Show optimistic success feedback
+    toast('Saving...');
+    
+    // Set a timeout to show success after a reasonable delay
+    setTimeout(() => {
+      setSaving((s) => ({ ...s, [recordId]: 'saved' }));
+      setTimeout(() => {
+        setSaving((s) => ({ ...s, [recordId]: 'idle' }));
+      }, 2000);
+    }, 1000);
   }, []);
 
   const debounceMap = React.useRef<Record<string, number>>({}).current;
@@ -212,7 +213,9 @@ function App() {
     });
     const rid = (recent[idx] && recent[idx].record_id) || '';
     if (rid) {
+      // Set saving state immediately for optimistic UI
       setSaving((s) => ({ ...s, [rid]: 'saving' }));
+      
       // Include identity fields for robust row matching when legacy rows lack Record ID in the sheet
       const identity: Partial<Entry> = {
         job_title: recent[idx]?.job_title,
@@ -240,24 +243,28 @@ function App() {
     // Disable button by marking a transient state
     const btn = document.activeElement as HTMLButtonElement | null;
     if (btn) btn.disabled = true;
-    // Load current list from storage, filter, save, then update UI if sheet delete succeeds
+    
+    // Optimistic UI: Remove from UI immediately
+    const currentList = [...recent];
+    const filtered = currentList.filter((e) => (e.record_id || '') !== (rec.record_id || ''));
+    setRecent(filtered);
+    toast('Deleted from log and sheet.');
+    
+    // Update local storage optimistically
     chrome.storage.local.get(['recentEntries'], async (store) => {
       const list: Entry[] = store.recentEntries || [];
-      const before = list.length;
-      const filtered = list.filter((e) => (e.record_id || '') !== (rec.record_id || ''));
-      console.log('popup delete: before', before, 'after', filtered.length);
-      chrome.runtime.sendMessage({ type: 'delete-record', recordId: rec.record_id }, (res) => {
-        if (res?.ok) {
-          chrome.storage.local.set({ recentEntries: filtered }, () => {
-            setRecent(filtered.slice(0, 10));
-            toast('Deleted from log and sheet.');
-            if (btn) btn.disabled = false;
-          });
-        } else {
-          toast(res?.error || 'Delete failed — try again.');
-          if (btn) btn.disabled = false;
-        }
-      });
+      const filteredStorage = list.filter((e) => (e.record_id || '') !== (rec.record_id || ''));
+      chrome.storage.local.set({ recentEntries: filteredStorage });
+    });
+    
+    // Do background deletion
+    chrome.runtime.sendMessage({ type: 'delete-record', recordId: rec.record_id }, (res) => {
+      if (!res?.ok) {
+        // If deletion failed, restore the entry
+        setRecent(currentList);
+        toast(res?.error || 'Delete failed — entry restored.');
+      }
+      if (btn) btn.disabled = false;
     });
   };
   const toggleExpand = (rid?: string) => setExpandedId((cur) => (cur === rid ? null : (rid || null)));

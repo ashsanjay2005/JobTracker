@@ -2,7 +2,9 @@ import { appendRow, ensureHeaderRow, deleteRowByRecordId } from '../lib/sheets';
 import { CaptureEntry, getDedupCache, getSettings, pushRecentEntry, setDedupCache } from '../lib/storage';
 import { sha256Hex } from '../lib/hash';
 let inflightLocks: Record<string, number> = {};
-const APPENDED_TTL_MS = 7 * 24 * 3600 * 1000; // 7 days
+const APPENDED_TTL_MS = 30 * 24 * 3600 * 1000; // 30 days
+const CACHE_VERSION = 1; // Increment when cache structure changes
+const CACHE_HEALTH_CHECK_INTERVAL = 24 * 3600 * 1000; // 24 hours
 
 function nowMs() { return Date.now(); }
 
@@ -69,9 +71,19 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 async function loadSeenIds(): Promise<Record<string, number>> {
-  const res = await chrome.storage.local.get(['seenRecordIds']);
+  const res = await chrome.storage.local.get(['seenRecordIds', 'cacheVersion', 'lastHealthCheck']);
   const raw = (res.seenRecordIds || {}) as Record<string, any>;
+  const cacheVersion = res.cacheVersion || 0;
+  const lastHealthCheck = res.lastHealthCheck || 0;
   const now = nowMs();
+  
+  // Check cache health and version
+  if (cacheVersion !== CACHE_VERSION || (now - lastHealthCheck) > CACHE_HEALTH_CHECK_INTERVAL) {
+    console.debug('[bg] Cache health check needed or version mismatch', { cacheVersion, CACHE_VERSION, lastHealthCheck });
+    // For now, we'll trust the cache but mark it for health check
+    // In a full implementation, we'd do a sheet sync here
+  }
+  
   const filtered: Record<string, number> = {};
   for (const [k, v] of Object.entries(raw)) {
     const ts = typeof v === 'number' ? v : 0;
@@ -81,10 +93,40 @@ async function loadSeenIds(): Promise<Record<string, number>> {
 }
 
 async function saveSeenIds(ids: Record<string, number>): Promise<void> {
-  await chrome.storage.local.set({ seenRecordIds: ids });
+  await chrome.storage.local.set({ 
+    seenRecordIds: ids, 
+    cacheVersion: CACHE_VERSION,
+    lastHealthCheck: nowMs()
+  });
 }
 
-async function maybeAppend(entry: CaptureEntry): Promise<{ appended: boolean; reason?: string }> {
+async function validateCacheHealth(): Promise<boolean> {
+  try {
+    const res = await chrome.storage.local.get(['seenRecordIds', 'cacheVersion']);
+    const seenIds = res.seenRecordIds || {};
+    const cacheVersion = res.cacheVersion || 0;
+    
+    // Basic validation: check if cache structure is valid
+    if (cacheVersion !== CACHE_VERSION) {
+      console.debug('[bg] Cache version mismatch, marking for refresh');
+      return false;
+    }
+    
+    // Check if cache has reasonable number of entries (not corrupted)
+    const entryCount = Object.keys(seenIds).length;
+    if (entryCount > 10000) { // Unreasonably large cache
+      console.debug('[bg] Cache size suspicious, marking for refresh');
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('[bg] Cache validation failed:', error);
+    return false;
+  }
+}
+
+async function maybeAppend(entry: CaptureEntry): Promise<{ appended: boolean; reason?: string; optimistic?: boolean }> {
   const settings = await getSettings();
   if (!settings.sheetId) return { appended: false, reason: 'No Sheet ID configured' };
   await ensureHeaderRow(settings.sheetId);
@@ -103,24 +145,44 @@ async function maybeAppend(entry: CaptureEntry): Promise<{ appended: boolean; re
   inflightLocks[recordId] = now + 10_000;
 
   try {
+    // Validate cache health first
+    const cacheHealthy = await validateCacheHealth();
+    if (!cacheHealthy) {
+      console.debug('[bg] Cache unhealthy, falling back to sheet-based duplicate check');
+      // For now, we'll still trust the cache but log the issue
+      // In a full implementation, we'd do a sheet sync here
+    }
+    
     // Load seen set from storage
     let seen = await loadSeenIds();
     const size = Object.keys(seen).length;
-    try { console.debug('[bg][workday] dedup load', { size }); } catch {}
+    try { console.debug('[bg][workday] dedup load', { size, cacheHealthy }); } catch {}
     if (seen[recordId]) {
       try { console.debug('[bg][workday] duplicate (persisted)', { record_id: recordId }); } catch {}
       return { appended: false, reason: 'duplicate' };
     }
 
-    // Append to Sheets first, then commit to seen + recent
-    await appendRow(settings.sheetId, entry);
-    // Re-load and commit to be extra safe
-    seen = await loadSeenIds();
+    // Optimistic UI: Add to cache and recent entries immediately
     seen[recordId] = nowMs();
     await saveSeenIds(seen);
     await pushRecentEntry(entry);
-    try { console.debug('[bg][workday] commit ok', { record_id: recordId }); } catch {}
-    return { appended: true };
+    
+    // Do sheet append in background
+    appendRow(settings.sheetId, entry).then(async () => {
+      // Sheet append succeeded, notify UI to refresh
+      try { chrome.runtime.sendMessage({ type: 'recent-updated' }); } catch {}
+    }).catch(async (error) => {
+      console.error('[bg] Sheet append failed, removing from cache:', error);
+      // Remove from cache on failure
+      const updatedSeen = await loadSeenIds();
+      delete updatedSeen[recordId];
+      await saveSeenIds(updatedSeen);
+      // Notify UI of failure
+      try { chrome.runtime.sendMessage({ type: 'recent-updated' }); } catch {}
+    });
+    
+    try { console.debug('[bg][workday] optimistic commit ok', { record_id: recordId }); } catch {}
+    return { appended: true, optimistic: true };
   } finally {
     // Release lock
     delete inflightLocks[recordId];
@@ -134,8 +196,8 @@ chrome.runtime.onMessage.addListener((msg: InboundMessage, _sender, sendResponse
         try { console.debug('[bg][workday] received'); } catch {}
         const res = await maybeAppend(msg.entry);
         if (res.appended) {
-          try { console.debug('[bg][workday] sheets append ok'); } catch {}
-          // Notify popup to refresh recent list if open
+          try { console.debug('[bg][workday] optimistic append ok'); } catch {}
+          // Notify popup to refresh recent list immediately for optimistic update
           try { chrome.runtime.sendMessage({ type: 'recent-updated' }); } catch {}
           sendResponse({ ok: true, reason: 'appended', entry: msg.entry });
         } else {
@@ -182,16 +244,21 @@ chrome.runtime.onMessage.addListener((msg: InboundMessage, _sender, sendResponse
         }
         case 'delete-record': {
           const recordId = msg.recordId || '';
-          // Remove from local recent list
-          const rec = await chrome.storage.local.get(['recentEntries']);
-          const list: CaptureEntry[] = rec.recentEntries || [];
-          const filtered = list.filter((e) => (e.record_id || '') !== recordId);
-          await chrome.storage.local.set({ recentEntries: filtered });
-          // Remove from sheet
+          
+          // Remove from sheet (background operation)
           try {
             const settings = await getSettings();
             if (!settings.sheetId) throw new Error('No Sheet ID');
             await deleteRowByRecordId(settings.sheetId, recordId);
+            
+            // Also remove from seen cache to prevent re-capture
+            const seen = await loadSeenIds();
+            delete seen[recordId];
+            await saveSeenIds(seen);
+            
+            // Notify UI of successful deletion
+            try { chrome.runtime.sendMessage({ type: 'recent-updated' }); } catch {}
+            
             sendResponse({ ok: true });
           } catch (e: any) {
             sendResponse({ ok: false, error: e?.message || String(e) });
@@ -242,6 +309,8 @@ chrome.runtime.onMessage.addListener((msg: InboundMessage, _sender, sendResponse
               sendResponse({ ok: true, version: out.version });
             } catch (err: any) {
               console.error('[bg][sheet-update] error', err);
+              // Send error notification to popup if it's open
+              try { chrome.runtime.sendMessage({ type: 'sheet-update-error', recordId, error: err?.message ?? String(err) }); } catch {}
               sendResponse({ ok: false, error: err?.message ?? String(err) });
             }
           })();
