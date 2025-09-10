@@ -30,36 +30,36 @@ export async function ensureAuthToken(interactive = true): Promise<string> {
   AUTH_IN_FLIGHT = (async () => {
     const manifest = chrome.runtime.getManifest();
     const clientId = manifest.oauth2?.client_id as string;
-    const redirectUri = chrome.identity.getRedirectURL('oauth2');
-    console.log('OAuth client_id in use:', clientId);
-    console.log('Using redirect_uri:', redirectUri);
-    const expected = `https://${chrome.runtime.id}.chromiumapp.org/oauth2`;
-    if (redirectUri !== expected) {
-      console.error('Redirect mismatch at runtime:', { redirectUri, expected });
-      throw new Error('Redirect URI mismatch at runtime');
-    }
-    if (!clientId.endsWith('.apps.googleusercontent.com')) {
-      console.warn('Suspicious client_id (does not look like a Google OAuth client):', clientId);
-    }
+  const redirectUri = chrome.identity.getRedirectURL('oauth2');
+  console.log('OAuth client_id in use:', clientId);
+  console.log('Using redirect_uri:', redirectUri);
+  const expected = `https://${chrome.runtime.id}.chromiumapp.org/oauth2`;
+  if (redirectUri !== expected) {
+    console.error('Redirect mismatch at runtime:', { redirectUri, expected });
+    throw new Error('Redirect URI mismatch at runtime');
+  }
+  if (!clientId.endsWith('.apps.googleusercontent.com')) {
+    console.warn('Suspicious client_id (does not look like a Google OAuth client):', clientId);
+  }
 
-    const authUrl = new URL(GOOGLE_AUTH_BASE);
-    authUrl.searchParams.set('client_id', clientId);
-    authUrl.searchParams.set('redirect_uri', redirectUri);
-    authUrl.searchParams.set('response_type', 'token');
-    authUrl.searchParams.set('scope', 'https://www.googleapis.com/auth/spreadsheets');
-    authUrl.searchParams.set('prompt', 'consent');
-    authUrl.searchParams.set('include_granted_scopes', 'true');
-    console.log('Auth URL:', authUrl.toString());
+  const authUrl = new URL(GOOGLE_AUTH_BASE);
+  authUrl.searchParams.set('client_id', clientId);
+  authUrl.searchParams.set('redirect_uri', redirectUri);
+  authUrl.searchParams.set('response_type', 'token');
+  authUrl.searchParams.set('scope', 'https://www.googleapis.com/auth/spreadsheets');
+  authUrl.searchParams.set('prompt', 'consent');
+  authUrl.searchParams.set('include_granted_scopes', 'true');
+  console.log('Auth URL:', authUrl.toString());
 
-    const redirectResult = await chrome.identity.launchWebAuthFlow({ url: authUrl.toString(), interactive });
-    const fragment = redirectResult.split('#')[1] || '';
-    const fragParams = new URLSearchParams(fragment);
-    const accessToken = fragParams.get('access_token');
-    const expiresIn = Number(fragParams.get('expires_in') || '3600');
-    if (!accessToken) throw new Error('Failed to obtain access token');
-    const expiry = Date.now() + expiresIn * 1000;
-    await saveToken({ accessToken, expiry });
-    return accessToken;
+  const redirectResult = await chrome.identity.launchWebAuthFlow({ url: authUrl.toString(), interactive });
+  const fragment = redirectResult.split('#')[1] || '';
+  const fragParams = new URLSearchParams(fragment);
+  const accessToken = fragParams.get('access_token');
+  const expiresIn = Number(fragParams.get('expires_in') || '3600');
+  if (!accessToken) throw new Error('Failed to obtain access token');
+  const expiry = Date.now() + expiresIn * 1000;
+  await saveToken({ accessToken, expiry });
+  return accessToken;
   })();
   try {
     return await AUTH_IN_FLIGHT;
@@ -235,7 +235,7 @@ async function getHeaderValues(sheetId: string, sheetName: string): Promise<stri
   const range = encodeURIComponent(`${sheetName}!1:1`);
   const res = await sheetsFetch(`spreadsheets/${sheetId}/values/${range}?majorDimension=ROWS`, { method: 'GET' });
   if (!res.ok) return [];
-  const data = await res.json();
+    const data = await res.json();
   return (data.values?.[0] || []).map((v: any) => String(v).trim());
 }
 
@@ -597,7 +597,7 @@ export async function updateRowByRecordId(sheetId: string, recordId: string, pat
     try {
       const m = String(get('Job Title')).match(/HYPERLINK\("([^"]+)/);
       if (m && m[1]) existingUrl = m[1];
-    } catch {}
+  } catch {}
     const url = patch.job_posting_url !== undefined ? patch.job_posting_url : existingUrl;
     const cell = url ? `=HYPERLINK("${url}","${(title || '').replace(/"/g, '""')}")` : title;
     set('Job Title', cell);

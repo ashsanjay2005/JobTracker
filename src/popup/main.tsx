@@ -262,11 +262,30 @@ function App() {
   };
   const toggleExpand = (rid?: string) => setExpandedId((cur) => (cur === rid ? null : (rid || null)));
 
+  // Format location to show only "City, ST/Province"
+  const formatLocation = (location: string): string => {
+    if (!location) return '—';
+    // Remove country names, postal codes, and extra text
+    const cleaned = location
+      .replace(/\b(Canada|USA|United States|US|CA|ON|BC|AB|QC|MB|SK|NS|NB|NL|PE|YT|NT|NU)\b/gi, '')
+      .replace(/\b\d{5}(-\d{4})?\b/g, '') // Remove US postal codes
+      .replace(/\b[A-Z]\d[A-Z]\s*\d[A-Z]\d\b/g, '') // Remove Canadian postal codes
+      .replace(/[,\s]+/g, ' ') // Normalize spaces
+      .trim();
+    
+    // Extract city and state/province if present
+    const parts = cleaned.split(',').map(p => p.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0]}, ${parts[1]}`;
+    }
+    return parts[0] || location;
+  };
+
   return (
-    <div className="p-4 space-y-3">
+    <div className="p-3 space-y-2 w-96">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Job Tracker</h1>
-        <button onClick={openOptions} className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600">Options</button>
+        <button onClick={openOptions} className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600" aria-label="Open settings">Settings</button>
       </div>
       <button onClick={openSheet} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded text-sm">View Your Job Log</button>
       <div>
@@ -287,95 +306,112 @@ function App() {
             {syncing ? 'Syncing...' : 'Sync from Sheet'}
           </button>
         </div>
-        <div className="space-y-2 max-h-80 overflow-auto pr-1">
+        <div className="space-y-1 max-h-96 overflow-auto">
           {recent.length === 0 && <div className="text-xs text-gray-400">No entries yet</div>}
           {recent.map((e, i) => {
             const rid = e.record_id || String(i);
             const isOpen = expandedId === rid;
             return (
-              <div key={rid}
-                role="button" tabIndex={0}
-                onClick={() => { if (!isOpen && e.job_posting_url) { const href = /^https?:\/\//i.test(e.job_posting_url) ? e.job_posting_url : `https://${e.job_posting_url}`; chrome.tabs.create({ url: href }); } }}
-                onKeyDown={(ev) => { if (!isOpen && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); if (e.job_posting_url) { const href = /^https?:\/\//i.test(e.job_posting_url) ? e.job_posting_url : `https://${e.job_posting_url}`; chrome.tabs.create({ url: href }); } } }}
-                className="p-3 rounded-2xl bg-gray-800 hover:bg-gray-700/80 shadow-sm transition-colors outline-none focus:ring-2 focus:ring-sky-400">
-                <div className="flex items-start gap-3">
-                  <div className="flex-1">
+              <div 
+                key={rid}
+                role="button" 
+                tabIndex={0}
+                onClick={() => { 
+                  if (e.job_posting_url) { 
+                    const href = /^https?:\/\//i.test(e.job_posting_url) ? e.job_posting_url : `https://${e.job_posting_url}`; 
+                    chrome.tabs.create({ url: href }); 
+                  }
+                }}
+                onKeyDown={(ev) => { 
+                  if ((ev.key === 'Enter' || ev.key === ' ') && e.job_posting_url) { 
+                    ev.preventDefault(); 
+                    const href = /^https?:\/\//i.test(e.job_posting_url) ? e.job_posting_url : `https://${e.job_posting_url}`; 
+                    chrome.tabs.create({ url: href }); 
+                  } 
+                }}
+                className="p-2 rounded-lg bg-gray-800 hover:bg-gray-700/80 shadow-sm transition-colors cursor-pointer outline-none focus:ring-2 focus:ring-sky-400"
+              >
+                <div className="flex items-start gap-2">
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="text-base font-semibold leading-tight">{e.job_title || '—'}</div>
-                        <div className="text-xs text-gray-300">{e.company || '—'}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm font-semibold leading-tight ${isOpen ? '' : 'truncate'}`} title={isOpen ? '' : (e.job_title || '—')}>{e.job_title || '—'}</div>
+                        <div className={`text-xs text-gray-300 ${isOpen ? '' : 'truncate'}`} title={isOpen ? '' : (e.company || '—')}>{e.company || '—'}</div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="hidden sm:inline text-[10px] text-gray-400">{e.date_applied || '—'}</span>
-                        <span className="hidden sm:inline text-[10px] text-gray-400">{e.listing_posted_date || '—'}</span>
-                        <span className="hidden sm:inline text-[10px] text-gray-400">{e.job_timeline || '—'}</span>
-                        <span className="hidden sm:inline text-gray-400">{e.location || '—'}</span>
-                        <span className="hidden sm:inline"><span className="mr-1"/><span /></span>
-                        <span><span className="mr-1"/><span /></span>
-                        <span><span className="mr-1"/><span /></span>
-                        <span><span className="mr-1"/><span /></span>
-                        <span><span className="mr-1"/><span /></span>
-                        <span><span className="mr-1"/><span /></span>
-                        <span><span className="mr-1"/><span /></span>
-                        <span><span className="mr-1"/><span /></span>
-                        <span><span className="mr-1"/><span /></span>
-                        <span><span className="mr-1"/><span /></span>
-                        <span><span className="mr-1"/><span /></span>
-                        <span className="mr-1"><span /></span>
-                        <span className="mr-1"><span /></span>
-                        <span className="mr-1"><span /></span>
-                        <span className="mr-1"><span /></span>
-                        <span className="mr-1"><span /></span>
-                        <span className="mr-1"><span /></span>
-                        <span className="mr-1"><span /></span>
-                        <span className="mr-1"><span /></span>
-                        <span className="mr-1"><span /></span>
-                        <span className="mr-1"><span /></span>
-                        <span className="mr-1"><span /></span>
-                        <span className="mr-1"><span /></span>
-                        <button aria-label="Toggle details" className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} onClick={(ev) => { ev.stopPropagation(); toggleExpand(rid); }}>⌄</button>
-                        <button aria-label="Delete" onClick={(ev) => { ev.stopPropagation(); deleteEntry(e, i); }} className="text-xs px-2 py-1 rounded bg-red-600 hover:bg-red-500">✕</button>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button 
+                          aria-label="Toggle details" 
+                          className={`px-2 py-1 rounded text-gray-400 hover:text-white hover:bg-gray-700 transition-all duration-200 focus:ring-2 focus:ring-sky-400 focus:outline-none ${isOpen ? 'rotate-180 bg-gray-700' : ''}`} 
+                          onClick={(ev) => { ev.stopPropagation(); toggleExpand(rid); }}
+                        >
+                          ⌄
+                        </button>
                       </div>
                     </div>
-                    <div className="mt-1 text-xs text-gray-400 flex flex-wrap gap-x-4 gap-y-1">
-                      <span>{e.location || '—'}</span>
-                      <span>{e.job_timeline || '—'}</span>
-                      <span>{e.date_applied || '—'}</span>
-                      <span>{e.listing_posted_date || '—'}</span>
-                      <span className="ml-auto"><span className="mr-2"/><span /></span>
+                    <div className="mt-1 text-xs text-gray-400">
+                      <span className={isOpen ? '' : 'truncate'} title={isOpen ? '' : formatLocation(e.location || '')}>{formatLocation(e.location || '')}</span>
                     </div>
                   </div>
                 </div>
                 {isOpen && (
-                  <div className="mt-3 border-t border-white/5 pt-3 space-y-2">
+                  <div className="mt-2 border-t border-white/5 pt-2 space-y-3">
                     <div className="grid grid-cols-2 gap-2">
-                      <input className="bg-gray-900 text-xs px-2 h-10 rounded" value={e.job_title}
-                        onChange={(ev) => onFieldChange(i, 'job_title', ev.target.value)} placeholder="Job Title" />
-                      <input className="bg-gray-900 text-xs px-2 h-10 rounded" value={e.job_posting_url}
-                        onChange={(ev) => onFieldChange(i, 'job_posting_url', ev.target.value)} placeholder="Link URL" />
-                      <input className="bg-gray-900 text-xs px-2 h-10 rounded" value={e.company}
-                        onChange={(ev) => onFieldChange(i, 'company', ev.target.value)} placeholder="Company" />
-                      <input className="bg-gray-900 text-xs px-2 h-10 rounded" value={e.location}
-                        onChange={(ev) => onFieldChange(i, 'location', ev.target.value)} placeholder="Location" />
-                      <input className="bg-gray-900 text-xs px-2 h-10 rounded" value={e.job_timeline}
-                        onChange={(ev) => onFieldChange(i, 'job_timeline', ev.target.value)} placeholder="Job Timeline" />
-                      <input className="bg-gray-900 text-xs px-2 h-10 rounded" value={e.date_applied}
-                        onChange={(ev) => onFieldChange(i, 'date_applied', ev.target.value)} placeholder="Date Applied" />
-                      <input className="bg-gray-900 text-xs px-2 h-10 rounded" value={e.listing_posted_date}
-                        onChange={(ev) => onFieldChange(i, 'listing_posted_date', ev.target.value)} placeholder="Date Posted" />
-                      <select className="h-10 px-3 pr-8 rounded-lg bg-slate-900/70 border border-slate-700 text-slate-100 appearance-none cursor-pointer text-[0.95rem]" value={e.cover_letter || 'Not set'}
-                        onChange={(ev) => onFieldChange(i, 'cover_letter', ev.target.value)}>
-                        {COVER_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                      </select>
-                      <select className="h-10 px-3 pr-8 rounded-lg bg-slate-900/70 border border-slate-700 text-slate-100 appearance-none cursor-pointer text-[0.95rem]" value={e.status || 'Applied'}
-                        onChange={(ev) => onFieldChange(i, 'status', ev.target.value)}>
+                      <input className="bg-gray-900 text-xs px-2 h-8 rounded" value={e.company}
+                        onChange={(ev) => onFieldChange(i, 'company', ev.target.value)} 
+                        onClick={(ev) => ev.stopPropagation()}
+                        placeholder="Company" />
+                      <input className="bg-gray-900 text-xs px-2 h-8 rounded" value={e.job_title}
+                        onChange={(ev) => onFieldChange(i, 'job_title', ev.target.value)} 
+                        onClick={(ev) => ev.stopPropagation()}
+                        placeholder="Job Title" />
+                      <input className="bg-gray-900 text-xs px-2 h-8 rounded" value={e.location}
+                        onChange={(ev) => onFieldChange(i, 'location', ev.target.value)} 
+                        onClick={(ev) => ev.stopPropagation()}
+                        placeholder="Location" />
+                      <select className="h-8 px-2 pr-6 rounded bg-slate-900/70 border border-slate-700 text-slate-100 appearance-none cursor-pointer text-xs" value={e.status || 'Applied'}
+                        onChange={(ev) => onFieldChange(i, 'status', ev.target.value)}
+                        onClick={(ev) => ev.stopPropagation()}>
                         {STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
                       </select>
                     </div>
+                    
+                    {/* Status and Dates Section with Headings */}
+                    <div className="space-y-2">
+                      <div className="text-xs text-gray-300 font-medium">Status & Dates</div>
+                      <div className="grid grid-cols-1 gap-2 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Status:</span>
+                          <span className="text-gray-200">{e.status || 'Applied'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Date posted:</span>
+                          <span className="text-gray-200">{e.listing_posted_date || '—'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Date applied:</span>
+                          <span className="text-gray-200">{e.date_applied || '—'}</span>
+                        </div>
+                      </div>
+                    </div>
+                    
                     <div className="text-[10px] text-gray-400">
                       {saving[rid] === 'saving' && 'Saving…'}
                       {saving[rid] === 'saved' && 'Saved'}
                       {saving[rid] === 'error' && <span className="text-rose-300">Save failed — try again.</span>}
+                    </div>
+                    <div className="border-t border-white/10 pt-2">
+                      <button 
+                        onClick={(ev) => { 
+                          ev.stopPropagation(); 
+                          if (confirm('Are you sure you want to delete this job entry?')) {
+                            deleteEntry(e, i); 
+                          }
+                        }} 
+                        className="w-full text-xs px-3 py-2 rounded bg-red-600 hover:bg-red-500 text-white transition-colors"
+                        aria-label="Delete job entry"
+                      >
+                        Delete
+                      </button>
                     </div>
                   </div>
                 )}
