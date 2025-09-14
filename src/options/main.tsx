@@ -47,11 +47,19 @@ const formatDomain = (url: string): string => {
 
 const isInLastDays = (dateStr: string, days: number): boolean => {
   try {
-    const date = new Date(dateStr);
+    if (!dateStr || dateStr.trim() === '') return false;
+    
+    // Handle the format "Dec 25th 2024" by removing ordinal suffixes
+    const cleanDateStr = dateStr.replace(/(\d+)(st|nd|rd|th)/g, '$1');
+    const date = new Date(cleanDateStr);
+    
+    // Check if date is valid
+    if (isNaN(date.getTime())) return false;
+    
     const now = new Date();
     const diffTime = now.getTime() - date.getTime();
     const diffDays = diffTime / (1000 * 60 * 60 * 24);
-    return diffDays <= days;
+    return diffDays >= 0 && diffDays <= days;
   } catch {
     return false;
   }
@@ -68,6 +76,64 @@ const normalizeStatus = (status: string | undefined): string => {
     'withdrawn': 'Withdrawn'
   };
   return statusMap[normalized] || 'Applied';
+};
+
+// Favicon utility functions
+const getFaviconUrl = (domain: string): string => {
+  try {
+    const cleanDomain = domain.replace(/^https?:\/\//, '').replace(/^www\./, '');
+    return `https://${cleanDomain}/favicon.ico`;
+  } catch {
+    return '';
+  }
+};
+
+const getGoogleFaviconUrl = (domain: string): string => {
+  try {
+    const cleanDomain = domain.replace(/^https?:\/\//, '').replace(/^www\./, '');
+    return `https://www.google.com/s2/favicons?domain=${cleanDomain}&sz=64`;
+  } catch {
+    return '';
+  }
+};
+
+// Favicon component with fallback chain
+const FaviconIcon: React.FC<{ domain: string; className?: string }> = ({ domain, className = '' }) => {
+  const [currentSrc, setCurrentSrc] = React.useState(getFaviconUrl(domain));
+  const [fallbackUsed, setFallbackUsed] = React.useState(false);
+
+  const handleError = () => {
+    if (!fallbackUsed) {
+      setFallbackUsed(true);
+      setCurrentSrc(getGoogleFaviconUrl(domain));
+    }
+  };
+
+  // Reset when domain changes
+  React.useEffect(() => {
+    setCurrentSrc(getFaviconUrl(domain));
+    setFallbackUsed(false);
+  }, [domain]);
+
+  return (
+    <div className={`w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center text-xs font-medium ${className}`}>
+      {fallbackUsed ? (
+        // Final fallback: letter monogram
+        <span>{domain.charAt(0).toUpperCase()}</span>
+      ) : (
+        // Try favicon image
+        <img
+          src={currentSrc}
+          alt={`${domain} icon`}
+          className="w-6 h-6 rounded-full"
+          onError={handleError}
+          onLoad={() => {
+            // Success - keep the image
+          }}
+        />
+      )}
+    </div>
+  );
 };
 
 // Custom hook for application statistics
@@ -160,69 +226,69 @@ const OverviewTab: React.FC<{ allEntries: Entry[] }> = ({ allEntries }) => {
         <h3 className="text-lg font-semibold mb-4">Application Funnel</h3>
         <div className="space-y-3">
           {/* Applied → Interviewing → Accepted */}
-          <div className="flex items-center space-x-4">
+          <div className="flex flex-col sm:flex-row sm:items-center space-y-1 sm:space-y-0 sm:space-x-4" aria-label={`Applied: ${stats.totals.applied}`}>
             <div className="w-20 text-sm text-gray-400">Applied</div>
-            <div className="flex-1 bg-gray-700 rounded-full h-4 relative">
+            <div className="flex-1 bg-gray-700 rounded-full h-4">
               <div 
                 className="bg-blue-500 h-4 rounded-full transition-all duration-300"
                 style={{ width: `${totalCount > 0 ? (stats.totals.applied / totalCount) * 100 : 0}%` }}
               />
-              <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white">
-                {stats.totals.applied}
-              </span>
+            </div>
+            <div className="w-12 text-right sm:text-right text-sm font-medium text-gray-200">
+              {stats.totals.applied}
             </div>
           </div>
           
-          <div className="flex items-center space-x-4">
+          <div className="flex flex-col sm:flex-row sm:items-center space-y-1 sm:space-y-0 sm:space-x-4" aria-label={`Interviewing: ${stats.totals.interviewing}`}>
             <div className="w-20 text-sm text-gray-400">Interviewing</div>
-            <div className="flex-1 bg-gray-700 rounded-full h-4 relative">
+            <div className="flex-1 bg-gray-700 rounded-full h-4">
               <div 
                 className="bg-yellow-500 h-4 rounded-full transition-all duration-300"
                 style={{ width: `${totalCount > 0 ? (stats.totals.interviewing / totalCount) * 100 : 0}%` }}
               />
-              <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white">
-                {stats.totals.interviewing}
-              </span>
+            </div>
+            <div className="w-12 text-right text-sm font-medium text-gray-200">
+              {stats.totals.interviewing}
             </div>
           </div>
           
-          <div className="flex items-center space-x-4">
+          <div className="flex flex-col sm:flex-row sm:items-center space-y-1 sm:space-y-0 sm:space-x-4" aria-label={`Accepted: ${stats.totals.accepted}`}>
             <div className="w-20 text-sm text-gray-400">Accepted</div>
-            <div className="flex-1 bg-gray-700 rounded-full h-4 relative">
+            <div className="flex-1 bg-gray-700 rounded-full h-4">
               <div 
                 className="bg-green-500 h-4 rounded-full transition-all duration-300"
                 style={{ width: `${totalCount > 0 ? (stats.totals.accepted / totalCount) * 100 : 0}%` }}
               />
-              <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white">
-                {stats.totals.accepted}
-              </span>
+            </div>
+            <div className="w-12 text-right text-sm font-medium text-gray-200">
+              {stats.totals.accepted}
             </div>
           </div>
           
           {/* Terminal states */}
-          <div className="flex items-center space-x-4">
+          <div className="flex flex-col sm:flex-row sm:items-center space-y-1 sm:space-y-0 sm:space-x-4" aria-label={`Rejected: ${stats.totals.rejected}`}>
             <div className="w-20 text-sm text-gray-400">Rejected</div>
-            <div className="flex-1 bg-gray-700 rounded-full h-4 relative">
+            <div className="flex-1 bg-gray-700 rounded-full h-4">
               <div 
                 className="bg-red-500 h-4 rounded-full transition-all duration-300"
                 style={{ width: `${totalCount > 0 ? (stats.totals.rejected / totalCount) * 100 : 0}%` }}
               />
-              <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white">
-                {stats.totals.rejected}
-              </span>
+            </div>
+            <div className="w-12 text-right text-sm font-medium text-gray-200">
+              {stats.totals.rejected}
             </div>
           </div>
           
-          <div className="flex items-center space-x-4">
+          <div className="flex flex-col sm:flex-row sm:items-center space-y-1 sm:space-y-0 sm:space-x-4" aria-label={`Withdrawn: ${stats.totals.withdrawn}`}>
             <div className="w-20 text-sm text-gray-400">Withdrawn</div>
-            <div className="flex-1 bg-gray-700 rounded-full h-4 relative">
+            <div className="flex-1 bg-gray-700 rounded-full h-4">
               <div 
                 className="bg-gray-500 h-4 rounded-full transition-all duration-300"
                 style={{ width: `${totalCount > 0 ? (stats.totals.withdrawn / totalCount) * 100 : 0}%` }}
               />
-              <span className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white">
-                {stats.totals.withdrawn}
-              </span>
+            </div>
+            <div className="w-12 text-right text-sm font-medium text-gray-200">
+              {stats.totals.withdrawn}
             </div>
           </div>
         </div>
@@ -230,19 +296,63 @@ const OverviewTab: React.FC<{ allEntries: Entry[] }> = ({ allEntries }) => {
 
       {/* Activity and Top Sources */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Activity Chips */}
+        {/* Recent Activity Cards */}
         <div className="bg-gray-800 rounded-2xl p-6">
           <h3 className="text-lg font-semibold mb-4">Recent Activity</h3>
-          <div className="flex flex-wrap gap-2">
-            <div className="bg-blue-900 text-blue-100 px-3 py-1 rounded-full text-sm">
-              Last 7 days: {stats.activity.last7}
-            </div>
-            <div className="bg-blue-900 text-blue-100 px-3 py-1 rounded-full text-sm">
-              Last 30 days: {stats.activity.last30}
-            </div>
-            <div className="bg-blue-900 text-blue-100 px-3 py-1 rounded-full text-sm">
-              Last 90 days: {stats.activity.last90}
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Last 7 days */}
+            <section 
+              role="group" 
+              aria-label={`Recent activity: last 7 days ${stats.activity.last7}`}
+              className="relative rounded-2xl p-4 sm:p-5 shadow-sm border border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/10 transition-all duration-200 cursor-default focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-opacity-50"
+              tabIndex={0}
+            >
+              <div className="absolute top-3 right-3 text-xs px-2 py-0.5 rounded-full bg-white/10 text-white/70">
+                7d
+              </div>
+              <div className="text-3xl sm:text-4xl font-semibold text-white mb-1">
+                {stats.activity.last7}
+              </div>
+              <div className="text-sm text-white/70">
+                Last 7 days
+              </div>
+            </section>
+
+            {/* Last 30 days */}
+            <section 
+              role="group" 
+              aria-label={`Recent activity: last 30 days ${stats.activity.last30}`}
+              className="relative rounded-2xl p-4 sm:p-5 shadow-sm border border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/10 transition-all duration-200 cursor-default focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-opacity-50"
+              tabIndex={0}
+            >
+              <div className="absolute top-3 right-3 text-xs px-2 py-0.5 rounded-full bg-white/10 text-white/70">
+                30d
+              </div>
+              <div className="text-3xl sm:text-4xl font-semibold text-white mb-1">
+                {stats.activity.last30}
+              </div>
+              <div className="text-sm text-white/70">
+                Last 30 days
+              </div>
+            </section>
+
+            {/* Last 90 days */}
+            <section 
+              role="group" 
+              aria-label={`Recent activity: last 90 days ${stats.activity.last90}`}
+              className="relative rounded-2xl p-4 sm:p-5 shadow-sm border border-white/5 bg-white/5 hover:bg-white/10 hover:border-white/10 transition-all duration-200 cursor-default focus-within:ring-2 focus-within:ring-blue-500 focus-within:ring-opacity-50"
+              tabIndex={0}
+            >
+              <div className="absolute top-3 right-3 text-xs px-2 py-0.5 rounded-full bg-white/10 text-white/70">
+                90d
+              </div>
+              <div className="text-3xl sm:text-4xl font-semibold text-white mb-1">
+                {stats.activity.last90}
+              </div>
+              <div className="text-sm text-white/70">
+                Last 90 days
+              </div>
+            </section>
           </div>
         </div>
 
@@ -254,9 +364,7 @@ const OverviewTab: React.FC<{ allEntries: Entry[] }> = ({ allEntries }) => {
               {stats.topSources.map((source, index) => (
                 <div key={source.domain} className="flex items-center justify-between">
                   <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center text-xs font-medium">
-                      {source.domain.charAt(0).toUpperCase()}
-                    </div>
+                    <FaviconIcon domain={source.domain} />
                     <span className="text-sm">{source.domain}</span>
                   </div>
                   <span className="text-sm text-gray-400">{source.count}</span>
