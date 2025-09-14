@@ -64,7 +64,8 @@ type InboundMessage =
   | { type: 'delete-record'; recordId?: string }
   | { type: 'workday-capture'; entry: CaptureEntry }
   | { type: 'sheet-pull' }
-  | { type: 'sheet-update'; record_id: string; patch: Partial<CaptureEntry> };
+  | { type: 'sheet-update'; record_id: string; patch: Partial<CaptureEntry> }
+  | { type: 'create-sheet' };
 
 chrome.runtime.onInstalled.addListener(() => {
   // nothing specific; pages are built via Vite
@@ -311,6 +312,26 @@ chrome.runtime.onMessage.addListener((msg: InboundMessage, _sender, sendResponse
               console.error('[bg][sheet-update] error', err);
               // Send error notification to popup if it's open
               try { chrome.runtime.sendMessage({ type: 'sheet-update-error', recordId, error: err?.message ?? String(err) }); } catch {}
+              sendResponse({ ok: false, error: err?.message ?? String(err) });
+            }
+          })();
+          
+          return true; // IMPORTANT for async response
+        }
+        case 'create-sheet': {
+          (async () => {
+            try {
+              const { createNewSpreadsheet } = await import('../lib/sheets');
+              const sheetId = await createNewSpreadsheet();
+              
+              // Save the new sheet ID to settings
+              const settings = await getSettings();
+              settings.sheetId = sheetId;
+              await chrome.storage.sync.set({ settings });
+              
+              sendResponse({ ok: true, sheetId });
+            } catch (err: any) {
+              console.error('[bg][create-sheet] error', err);
               sendResponse({ ok: false, error: err?.message ?? String(err) });
             }
           })();

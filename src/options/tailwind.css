@@ -2,4 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  /* Scoutly: precise, minimal nudge for the two filter selects */
+  .sl-select{
+    -webkit-appearance:none;
+    appearance:none;
+    background-repeat:no-repeat;
+    /* keep existing chevron if one is already set; otherwise add a simple one */
+    background-image: var(--sl-chevron, url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>"));
+    background-size: 0.9rem 0.9rem;
+    /* ⬅️ Nudge arrow left a bit (increase the inset from the right) */
+    background-position: right 1.1rem center;  /* adjust to 1.0–1.25rem if needed */
+    /* Ensure text doesn't collide with the icon */
+    padding-right: 2.5rem;
+  }
+  /* If a wrapper controls width/overflow, keep the icon visible */
+  .sl-select{ overflow: visible; }
+}
 

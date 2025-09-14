@@ -728,7 +728,7 @@ function App() {
                   <select
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="sl-select w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="all">All Statuses</option>
                     {STATUS_OPTIONS.map(status => (
@@ -743,7 +743,7 @@ function App() {
                   <select
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value as 'newest' | 'oldest')}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="sl-select w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="newest">Newest Applied First</option>
                     <option value="oldest">Oldest Applied First</option>
@@ -902,16 +902,102 @@ function App() {
             <h2 className="text-2xl font-bold">Settings</h2>
             
             <div className="bg-gray-800 rounded-lg p-6 space-y-6">
-              {/* Google Sheet ID */}
+              {/* Google Sheet Configuration */}
+              <div className="space-y-4">
+                <label className="block text-sm font-medium">Google Sheet Configuration</label>
+                
+                {settings.sheetId ? (
+                  // Show current sheet info
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3 bg-green-900/20 border border-green-700/50 rounded-md">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                        <div>
+                          <div className="text-sm font-medium text-green-200">Sheet Connected</div>
+                          <div className="text-xs text-green-300/70">ID: {settings.sheetId}</div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={openGoogleSheet}
+                        className="px-3 py-1 text-xs bg-green-700 text-green-100 rounded hover:bg-green-600 transition-colors"
+                      >
+                        Open Sheet
+                      </button>
+                    </div>
+                    
+                    <div className="flex space-x-2">
+                      <input
+                        value={settings.sheetId}
+                        onChange={(e) => setSettings({ ...settings, sheetId: e.target.value })}
+                        className="flex-1 bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                        placeholder="Enter different sheet ID..."
+                      />
+                      <button
+                        onClick={() => setSettings({ ...settings, sheetId: '' })}
+                        className="px-3 py-2 text-sm bg-gray-600 text-gray-200 rounded hover:bg-gray-500 transition-colors"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  // Show create new sheet option
+                  <div className="space-y-3">
+                    <div className="p-4 bg-blue-900/20 border border-blue-700/50 rounded-md">
+                      <div className="flex items-start space-x-3">
+                        <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                          </svg>
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-sm font-medium text-blue-200 mb-1">Create New Google Sheet</h3>
+                          <p className="text-xs text-blue-300/70 mb-3">
+                            We'll automatically create a new Google Sheet with the proper headers and formatting for your job applications.
+                          </p>
+                          <button
+                            onClick={async () => {
+                              setStatus('Creating new Google Sheet...');
+                              chrome.runtime.sendMessage({ type: 'create-sheet' }, (res) => {
+                                if (res?.ok) {
+                                  setSettings({ ...settings, sheetId: res.sheetId });
+                                  setStatus('Google Sheet created successfully!');
+                                  setTimeout(() => setStatus(null), 3000);
+                                } else {
+                                  setStatus(`Failed to create sheet: ${res?.error || 'Unknown error'}`);
+                                  setTimeout(() => setStatus(null), 5000);
+                                }
+                              });
+                            }}
+                            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-sm font-medium"
+                          >
+                            Create New Sheet
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="relative">
+                      <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-gray-600"></div>
+                      </div>
+                      <div className="relative flex justify-center text-sm">
+                        <span className="px-2 bg-gray-800 text-gray-400">or</span>
+                      </div>
+                    </div>
+                    
       <div className="space-y-2">
-        <label className="block text-sm font-medium">Google Sheet ID</label>
-                <input
-                  value={settings.sheetId}
-                  onChange={(e) => setSettings({ ...settings, sheetId: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="1abcDEF..."
-                />
-                <p className="text-xs text-gray-400">The ID in `https://docs.google.com/spreadsheets/d/ID/edit`</p>
+                      <label className="block text-xs font-medium text-gray-400">Use Existing Sheet</label>
+                      <input
+                        value={settings.sheetId}
+                        onChange={(e) => setSettings({ ...settings, sheetId: e.target.value })}
+                        className="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                        placeholder="Enter Google Sheet ID..."
+                      />
+                      <p className="text-xs text-gray-400">The ID from `https://docs.google.com/spreadsheets/d/ID/edit`</p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Checkboxes */}
@@ -941,8 +1027,8 @@ function App() {
                   onChange={(checked) => setSettings({ ...settings, showToast: checked })}
                   label="Show success toast"
                 />
-              </div>
-
+      </div>
+      
               {/* Action Buttons */}
               <div className="flex items-center gap-3 pt-4">
                 <button
@@ -961,7 +1047,7 @@ function App() {
                 </button>
               </div>
             </div>
-          </div>
+      </div>
         )}
 
       </div>

@@ -301,6 +301,207 @@ function relativeTextToDateString(relative: string): string {
   return formatCalendarDate(d);
 }
 
+export async function createNewSpreadsheet(): Promise<string> {
+  const token = await ensureAuthToken();
+  const title = `Job Tracker - ${new Date().toLocaleDateString()}`;
+  
+  const response = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      properties: {
+        title: title,
+      },
+      sheets: [{
+        properties: {
+          title: 'Sheet1',
+          gridProperties: {
+            rowCount: 1000,
+            columnCount: 10,
+          },
+        },
+      }],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to create spreadsheet: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json();
+  const sheetId = data.spreadsheetId;
+  
+  // Set up the header row and formatting
+  await setupNewSpreadsheet(sheetId);
+  
+  return sheetId;
+}
+
+async function setupNewSpreadsheet(sheetId: string): Promise<void> {
+  const token = await ensureAuthToken();
+  
+  // Add header row
+  const headerValues = [
+    ['Job Title', 'Date Applied', 'Company', 'Location', 'Date Posted', 'Job Timeline', 'Cover Letter', 'Status', 'Record ID']
+  ];
+  
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Sheet1!A1:I1?valueInputOption=USER_ENTERED`, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      values: headerValues,
+    }),
+  });
+
+  // Format header row (bold, freeze, etc.)
+  const formatRequests = [
+    {
+      repeatCell: {
+        range: {
+          sheetId: 0,
+          startRowIndex: 0,
+          endRowIndex: 1,
+          startColumnIndex: 0,
+          endColumnIndex: 9,
+        },
+        cell: {
+          userEnteredFormat: {
+            textFormat: { bold: true },
+            backgroundColor: { red: 0.2, green: 0.2, blue: 0.2 },
+          },
+        },
+        fields: 'userEnteredFormat(textFormat,backgroundColor)',
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: {
+          sheetId: 0,
+          dimension: 'COLUMNS',
+          startIndex: 0,
+          endIndex: 1,
+        },
+        properties: { pixelSize: 200 },
+        fields: 'pixelSize',
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: {
+          sheetId: 0,
+          dimension: 'COLUMNS',
+          startIndex: 1,
+          endIndex: 2,
+        },
+        properties: { pixelSize: 120 },
+        fields: 'pixelSize',
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: {
+          sheetId: 0,
+          dimension: 'COLUMNS',
+          startIndex: 2,
+          endIndex: 3,
+        },
+        properties: { pixelSize: 150 },
+        fields: 'pixelSize',
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: {
+          sheetId: 0,
+          dimension: 'COLUMNS',
+          startIndex: 3,
+          endIndex: 4,
+        },
+        properties: { pixelSize: 120 },
+        fields: 'pixelSize',
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: {
+          sheetId: 0,
+          dimension: 'COLUMNS',
+          startIndex: 4,
+          endIndex: 5,
+        },
+        properties: { pixelSize: 100 },
+        fields: 'pixelSize',
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: {
+          sheetId: 0,
+          dimension: 'COLUMNS',
+          startIndex: 5,
+          endIndex: 6,
+        },
+        properties: { pixelSize: 120 },
+        fields: 'pixelSize',
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: {
+          sheetId: 0,
+          dimension: 'COLUMNS',
+          startIndex: 6,
+          endIndex: 7,
+        },
+        properties: { pixelSize: 100 },
+        fields: 'pixelSize',
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: {
+          sheetId: 0,
+          dimension: 'COLUMNS',
+          startIndex: 7,
+          endIndex: 8,
+        },
+        properties: { pixelSize: 100 },
+        fields: 'pixelSize',
+      },
+    },
+    {
+      updateDimensionProperties: {
+        range: {
+          sheetId: 0,
+          dimension: 'COLUMNS',
+          startIndex: 8,
+          endIndex: 9,
+        },
+        properties: { pixelSize: 120 },
+        fields: 'pixelSize',
+      },
+    },
+  ];
+
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      requests: formatRequests,
+    }),
+  });
+}
+
 export async function appendRow(sheetId: string, entry: CaptureEntry, sheetName = 'Sheet1'): Promise<void> {
   const postedRelative = (entry.posted_relative || entry.listing_posted_date || '').trim();
   const postedDate = relativeTextToDateString(postedRelative);
