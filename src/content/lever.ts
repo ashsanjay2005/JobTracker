@@ -46,11 +46,17 @@ function formatDate(): string {
 }
 
 function inferCompanyFromUrl(): string {
-  // https://jobs.lever.co/<company>/...
-  const parts = location.pathname.split('/').filter(Boolean);
-  const slug = parts[0] || '';
-  if (!slug) return '';
-  return slug.charAt(0).toUpperCase() + slug.slice(1);
+  // jobs.lever.co/<company>/<postingId>/apply or /<company>/<postingId>
+  try {
+    const u = new URL(location.href);
+    const parts = u.pathname.split('/').filter(Boolean);
+    // e.g., [company, postingId, 'apply']
+    const companySlug = parts[0] || '';
+    if (!companySlug) return '';
+    return companySlug; // keep as slug (e.g., janeapp)
+  } catch {
+    return '';
+  }
 }
 
 function cleanLeverUrl(): string {

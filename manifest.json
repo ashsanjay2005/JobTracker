@@ -1,31 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Scoutly: Job Tracker",
+  "name": "Job Tracker",
   "version": "1.0.0",
-  "description": "Track job applications from LinkedIn, Workday, and other job sites. Sync to Google Sheets with automatic setup and analytics.",
-  "author": "Job Tracker Team",
-  "homepage_url": "https://github.com/yourusername/job-tracker",
+  "description": "Track job applications from LinkedIn, Workday, and Oracle/Taleo, appending to your Google Sheet.",
   "action": {
     "default_popup": "src/popup/index.html",
-    "default_title": "Scoutly: Job Tracker",
-    "default_icon": {
-      "16": "icons/icon-16.png",
-      "32": "icons/icon-32.png",
-      "48": "icons/icon-48.png",
-      "128": "icons/icon-128.png"
-    }
-  },
-  "icons": {
-    "16": "icons/icon-16.png",
-    "32": "icons/icon-32.png",
-    "48": "icons/icon-48.png",
-    "128": "icons/icon-128.png"
+    "default_title": "Job Tracker"
   },
   "options_page": "src/options/index.html",
-  "options_ui": {
-    "page": "src/options/index.html",
-    "open_in_tab": true
-  },
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -41,7 +23,8 @@
     "https://*.workday.com/*",
     "https://*.myworkdayjobs.com/*",
     "https://*.taleo.net/*",
-    "https://*.oraclecloud.com/*"
+    "https://*.oraclecloud.com/*",
+    "https://*.greenhouse.io/*"
   ],
   "oauth2": {
     "client_id": "396912687021-32crmp3933ap8hluu4fbp4fasv4dsbc2.apps.googleusercontent.com",
@@ -55,14 +38,6 @@
         "https://*.linkedin.com/*"
       ],
       "js": ["content-linkedin.js"],
-      "run_at": "document_idle",
-      "all_frames": true
-    },
-    {
-      "matches": [
-        "https://jobs.lever.co/*"
-      ],
-      "js": ["content-lever.js"],
       "run_at": "document_idle",
       "all_frames": true
     },
@@ -94,6 +69,7 @@
         "https://*.myworkdayjobs.com/*",
         "https://*.taleo.net/*",
         "https://*.oraclecloud.com/*",
+        "https://*.greenhouse.io/*",
         "https://accounts.google.com/*",
         "https://*.google.com/recaptcha/*",
         "https://*.gstatic.com/*",
@@ -102,6 +78,14 @@
       "js": ["content-generic.js"],
       "run_at": "document_idle",
       "all_frames": false
+    },
+    {
+      "matches": [
+        "https://*.greenhouse.io/*"
+      ],
+      "js": ["content-greenhouse.js"],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ]
 }

@@ -312,8 +312,15 @@ function showToast() {
 }
 
 function send(entry: CaptureEntry, shouldToast: boolean) {
-  chrome.runtime.sendMessage({ type: 'append-entry', entry }, undefined, (res) => {
-    try { console.debug('[JobTracker][LinkedIn] send response', res); } catch {}
+  if (!chrome?.runtime?.id) {
+    try { console.debug('[JobTracker][LinkedIn] runtime.id missing; skipping send'); } catch {}
+    return;
+  }
+  try { console.debug('[JobTracker][LinkedIn] sending entry', { t: entry.job_title, c: entry.company, u: entry.job_posting_url }); } catch {}
+  chrome.runtime.sendMessage({ type: 'append-entry', entry }, (res) => {
+    const err = (chrome as any)?.runtime?.lastError || null;
+    try { console.debug('[JobTracker][LinkedIn] send response', { err, res }); } catch {}
+    if (err) return;
     if (shouldToast && res?.appended) showToast();
     if (res && res.appended === false && (res.reason === 'inflight' || res.reason === 'seen')) {
       try { console.debug('[JobTracker][LinkedIn] Already captured — skipped.'); } catch {}

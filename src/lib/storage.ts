@@ -7,6 +7,41 @@ export type Settings = {
   showToast: boolean;
 };
 
+// Safe storage functions to prevent sync errors
+export async function safeSyncSet(data: any) {
+  try { 
+    await chrome.storage.sync.set(data); 
+  } catch (e) { 
+    console.error("sync set failed", e); 
+  }
+}
+
+export async function safeSyncGet(keys: any) {
+  try { 
+    return await chrome.storage.sync.get(keys); 
+  } catch (e) { 
+    console.error("sync get failed", e); 
+    return {}; 
+  }
+}
+
+export async function safeLocalSet(data: any) {
+  try { 
+    await chrome.storage.local.set(data); 
+  } catch (e) { 
+    console.error("local set failed", e); 
+  }
+}
+
+export async function safeLocalGet(keys: any) {
+  try { 
+    return await chrome.storage.local.get(keys); 
+  } catch (e) { 
+    console.error("local get failed", e); 
+    return {}; 
+  }
+}
+
 export type CaptureEntry = {
   date_applied: string;
   job_title: string;
@@ -37,12 +72,12 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export async function getSettings(): Promise<Settings> {
-  const res = await chrome.storage.sync.get(['settings']);
+  const res = await safeSyncGet(['settings']);
   const settings = res.settings || {};
   // Migration: remove old oauthClientId if it exists
   if (settings.oauthClientId) {
     delete settings.oauthClientId;
-    chrome.storage.sync.set({ settings });
+    safeSyncSet({ settings });
   }
   return { ...DEFAULT_SETTINGS, ...settings } as Settings;
 }
@@ -50,7 +85,7 @@ export async function getSettings(): Promise<Settings> {
 export async function saveSettings(settings: Partial<Settings>): Promise<void> {
   const current = await getSettings();
   const merged = { ...current, ...settings } as Settings;
-  await chrome.storage.sync.set({ settings: merged });
+  await safeSyncSet({ settings: merged });
 }
 
 export async function getRecentEntries(limit = 10): Promise<CaptureEntry[]> {

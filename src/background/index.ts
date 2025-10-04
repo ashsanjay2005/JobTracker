@@ -1,6 +1,50 @@
 import { appendRow, ensureHeaderRow, deleteRowByRecordId } from '../lib/sheets';
 import { CaptureEntry, getDedupCache, getSettings, pushRecentEntry, setDedupCache } from '../lib/storage';
 import { sha256Hex } from '../lib/hash';
+
+// Simple header ensure cache
+async function ensureHeaderOnce(sheetId: string): Promise<void> {
+  const { headerEnsured } = await chrome.storage.local.get(['headerEnsured']);
+  const cache: Record<string, boolean> = headerEnsured || {};
+  if (cache[sheetId]) return;
+  await ensureHeaderRow(sheetId);
+  cache[sheetId] = true;
+  await chrome.storage.local.set({ headerEnsured: cache });
+}
+
+// Global error handling for background script
+self.addEventListener('error', (event) => {
+  console.error('[bg] Global error:', event.error);
+});
+
+self.addEventListener('unhandledrejection', (event) => {
+  console.error('[bg] Unhandled promise rejection:', event.reason);
+});
+
+// Health check function
+function isExtensionContextValid(): boolean {
+  try {
+    return typeof chrome !== 'undefined' && 
+           typeof chrome.runtime !== 'undefined' && 
+           typeof chrome.runtime.sendMessage === 'function';
+  } catch {
+    return false;
+  }
+}
+
+// Wrapper for sendResponse with error handling
+function safeSendResponse(sendResponse: (response?: any) => void, response: any) {
+  try {
+    if (isExtensionContextValid()) {
+      sendResponse(response);
+    } else {
+      console.warn('[bg] Extension context invalid, cannot send response');
+    }
+  } catch (error) {
+    console.error('[bg] Failed to send response:', error);
+  }
+}
+
 let inflightLocks: Record<string, number> = {};
 const APPENDED_TTL_MS = 30 * 24 * 3600 * 1000; // 30 days
 const CACHE_VERSION = 1; // Increment when cache structure changes
@@ -37,7 +81,7 @@ function normalizeWorkdayUrl(raw: string): { cleanUrl: string; reqId: string | n
   }
 }
 
-function computeRecordId(entry: CaptureEntry): string {
+async function computeRecordId(entry: CaptureEntry): Promise<string> {
   // Prefer LinkedIn job ID extracted from cleaned job URL
   const url = entry.job_posting_url || '';
   const m = url.match(/\/jobs\/view\/(\d+)\//);
@@ -52,7 +96,8 @@ function computeRecordId(entry: CaptureEntry): string {
     if (reqId) return `wd:${reqId}`;
   }
   const base = `${entry.job_title}|${entry.company}|${entry.job_posting_url}|${entry.date_applied}`;
-  return `h:${sha256Hex(base)}`;
+  const h = await sha256Hex(base);
+  return `h:${h}`;
 }
 
 type InboundMessage =
@@ -130,10 +175,10 @@ async function validateCacheHealth(): Promise<boolean> {
 async function maybeAppend(entry: CaptureEntry): Promise<{ appended: boolean; reason?: string; optimistic?: boolean }> {
   const settings = await getSettings();
   if (!settings.sheetId) return { appended: false, reason: 'No Sheet ID configured' };
-  await ensureHeaderRow(settings.sheetId);
+  await ensureHeaderOnce(settings.sheetId);
 
   // Compute record id and attach
-  const recordId = computeRecordId(entry);
+  const recordId = await computeRecordId(entry);
   entry.record_id = recordId;
 
   // In-flight debounce lock (10s)
@@ -200,15 +245,15 @@ chrome.runtime.onMessage.addListener((msg: InboundMessage, _sender, sendResponse
           try { console.debug('[bg][workday] optimistic append ok'); } catch {}
           // Notify popup to refresh recent list immediately for optimistic update
           try { chrome.runtime.sendMessage({ type: 'recent-updated' }); } catch {}
-          sendResponse({ ok: true, reason: 'appended', entry: msg.entry });
+          safeSendResponse(sendResponse, { ok: true, reason: 'appended', entry: msg.entry });
         } else {
           try { console.debug('[bg][workday] duplicate or skipped:', res.reason); } catch {}
           const reason = res.reason === 'seen' || res.reason === 'inflight' ? 'duplicate' : (res.reason || 'duplicate');
-          sendResponse({ ok: true, reason, entry: msg.entry });
+          safeSendResponse(sendResponse, { ok: true, reason, entry: msg.entry });
         }
       } catch (e: any) {
         try { console.error('[bg][workday] append failed', e); } catch {}
-        sendResponse({ ok: false, error: e?.message || String(e) });
+        safeSendResponse(sendResponse, { ok: false, error: e?.message || String(e) });
       }
     })();
     return true; // async branch
@@ -219,28 +264,28 @@ chrome.runtime.onMessage.addListener((msg: InboundMessage, _sender, sendResponse
         case 'test-connection': {
           const settings = await getSettings();
           if (!settings.sheetId) throw new Error('Sheet ID not set');
-          await ensureHeaderRow(settings.sheetId);
-          sendResponse({ ok: true });
+          await ensureHeaderOnce(settings.sheetId);
+          safeSendResponse(sendResponse, { ok: true });
           break;
         }
         case 'append-entry': {
           const res = await maybeAppend(msg.entry);
-          sendResponse({ ok: true, ...res });
+          safeSendResponse(sendResponse, { ok: true, ...res });
           break;
         }
         case 'get-settings': {
           const settings = await getSettings();
-          sendResponse({ ok: true, settings });
+          safeSendResponse(sendResponse, { ok: true, settings });
           break;
         }
         case 'save-settings': {
           await chrome.storage.sync.set({ settings: msg.settings });
-          sendResponse({ ok: true });
+          safeSendResponse(sendResponse, { ok: true });
           break;
         }
         case 'get-recent': {
           const res = await chrome.storage.local.get(['recentEntries']);
-          sendResponse({ ok: true, recent: (res.recentEntries || []).slice(0, 10) });
+          safeSendResponse(sendResponse, { ok: true, recent: (res.recentEntries || []).slice(0, 10) });
           break;
         }
         case 'delete-record': {
@@ -260,9 +305,9 @@ chrome.runtime.onMessage.addListener((msg: InboundMessage, _sender, sendResponse
             // Notify UI of successful deletion
             try { chrome.runtime.sendMessage({ type: 'recent-updated' }); } catch {}
             
-            sendResponse({ ok: true });
+            safeSendResponse(sendResponse, { ok: true });
           } catch (e: any) {
-            sendResponse({ ok: false, error: e?.message || String(e) });
+            safeSendResponse(sendResponse, { ok: false, error: e?.message || String(e) });
           }
           break;
         }
@@ -275,9 +320,9 @@ chrome.runtime.onMessage.addListener((msg: InboundMessage, _sender, sendResponse
             const { getRawSheetData } = await import('../lib/sheets');
             const data = await getRawSheetData(settings.sheetId);
             
-            sendResponse({ ok: true, rows: data.rows, header: data.header });
+            safeSendResponse(sendResponse, { ok: true, rows: data.rows, header: data.header });
           } catch (e: any) {
-            sendResponse({ ok: false, error: e?.message || String(e) });
+            safeSendResponse(sendResponse, { ok: false, error: e?.message || String(e) });
           }
           break;
         }
@@ -293,7 +338,7 @@ chrome.runtime.onMessage.addListener((msg: InboundMessage, _sender, sendResponse
               if (!settings.sheetId) throw new Error('NO_SHEET_ID');
 
               // Ensure header has the trailing Record ID column and correct order
-              await ensureHeaderRow(settings.sheetId);
+              await ensureHeaderOnce(settings.sheetId);
               const { updateRowByRecordId } = await import('../lib/sheets');
               const out = await updateRowByRecordId(settings.sheetId, recordId, patch);
               
@@ -307,12 +352,12 @@ chrome.runtime.onMessage.addListener((msg: InboundMessage, _sender, sendResponse
               }
               
               try { chrome.runtime.sendMessage({ type: 'recent-updated' }); } catch {}
-              sendResponse({ ok: true, version: out.version });
+              safeSendResponse(sendResponse, { ok: true, version: out.version });
             } catch (err: any) {
               console.error('[bg][sheet-update] error', err);
               // Send error notification to popup if it's open
               try { chrome.runtime.sendMessage({ type: 'sheet-update-error', recordId, error: err?.message ?? String(err) }); } catch {}
-              sendResponse({ ok: false, error: err?.message ?? String(err) });
+              safeSendResponse(sendResponse, { ok: false, error: err?.message ?? String(err) });
             }
           })();
           
@@ -329,20 +374,20 @@ chrome.runtime.onMessage.addListener((msg: InboundMessage, _sender, sendResponse
               settings.sheetId = sheetId;
               await chrome.storage.sync.set({ settings });
               
-              sendResponse({ ok: true, sheetId });
+              safeSendResponse(sendResponse, { ok: true, sheetId });
             } catch (err: any) {
               console.error('[bg][create-sheet] error', err);
-              sendResponse({ ok: false, error: err?.message ?? String(err) });
+              safeSendResponse(sendResponse, { ok: false, error: err?.message ?? String(err) });
             }
           })();
           
           return true; // IMPORTANT for async response
         }
         default:
-          sendResponse({ ok: false, error: 'Unknown message' });
+          safeSendResponse(sendResponse, { ok: false, error: 'Unknown message' });
       }
     } catch (e: any) {
-      sendResponse({ ok: false, error: e?.message || String(e) });
+      safeSendResponse(sendResponse, { ok: false, error: e?.message || String(e) });
     }
   })();
   return true; // async

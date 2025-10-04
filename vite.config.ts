@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import { resolve } from 'path';
 
 export default defineConfig({
+  publicDir: 'public',
   build: {
     outDir: 'dist',
     sourcemap: false,
@@ -14,7 +15,7 @@ export default defineConfig({
         'content-workday': resolve(__dirname, 'src/content/workday.ts'),
         'content-oracle-taleo': resolve(__dirname, 'src/content/oracle_taleo.ts'),
         'content-generic': resolve(__dirname, 'src/content/generic.ts'),
-        'content-lever': resolve(__dirname, 'src/content/lever.ts')
+        'content-greenhouse': resolve(__dirname, 'src/content/greenhouse.ts')
       },
       output: {
         entryFileNames: (chunk) => {
