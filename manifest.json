@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Job Tracker",
+  "name": "Scoutly: Job Tracker",
   "version": "1.0.0",
   "description": "Track job applications from LinkedIn, Workday, and Oracle/Taleo, appending to your Google Sheet.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
     "default_popup": "src/popup/index.html",
     "default_title": "Job Tracker"

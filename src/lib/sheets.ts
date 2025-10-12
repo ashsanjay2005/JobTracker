@@ -1,6 +1,7 @@
 import { CaptureEntry, getSettings } from './storage';
 
-const GOOGLE_AUTH_BASE = 'https://accounts.google.com/o/oauth2/auth';
+// Use OAuth v2 endpoint
+const GOOGLE_AUTH_BASE = 'https://accounts.google.com/o/oauth2/v2/auth';
 
 type TokenBundle = {
   accessToken: string;
@@ -28,38 +29,37 @@ export async function ensureAuthToken(interactive = true): Promise<string> {
   if (existing) return existing.accessToken;
   if (AUTH_IN_FLIGHT) return AUTH_IN_FLIGHT;
   AUTH_IN_FLIGHT = (async () => {
+    // Prefer ID from Options → settings.oauthClientId; fallback to manifest oauth2.client_id
+    const settingsWrap = await chrome.storage.sync.get(['settings']);
+    const settings = settingsWrap?.settings || {};
     const manifest = chrome.runtime.getManifest();
-    const clientId = manifest.oauth2?.client_id as string;
-  const redirectUri = chrome.identity.getRedirectURL('oauth2');
-  console.log('OAuth client_id in use:', clientId);
-  console.log('Using redirect_uri:', redirectUri);
-  const expected = `https://${chrome.runtime.id}.chromiumapp.org/oauth2`;
-  if (redirectUri !== expected) {
-    console.error('Redirect mismatch at runtime:', { redirectUri, expected });
-    throw new Error('Redirect URI mismatch at runtime');
-  }
-  if (!clientId.endsWith('.apps.googleusercontent.com')) {
-    console.warn('Suspicious client_id (does not look like a Google OAuth client):', clientId);
-  }
+    const clientId = (settings.oauthClientId || (manifest as any).oauth2?.client_id || '').trim();
+    if (!clientId) throw new Error('Missing Google OAuth Client ID. Set it in Options.');
 
-  const authUrl = new URL(GOOGLE_AUTH_BASE);
-  authUrl.searchParams.set('client_id', clientId);
-  authUrl.searchParams.set('redirect_uri', redirectUri);
-  authUrl.searchParams.set('response_type', 'token');
-  authUrl.searchParams.set('scope', 'https://www.googleapis.com/auth/spreadsheets');
-  authUrl.searchParams.set('prompt', 'consent');
-  authUrl.searchParams.set('include_granted_scopes', 'true');
-  console.log('Auth URL:', authUrl.toString());
+    const redirectUri = chrome.identity.getRedirectURL('oauth2');
+    try {
+      console.debug('[JT][Auth] Using redirect_uri:', redirectUri, 'extId:', chrome.runtime.id);
+      console.debug('[JT][Auth] Using client_id:', clientId);
+    } catch {}
 
-  const redirectResult = await chrome.identity.launchWebAuthFlow({ url: authUrl.toString(), interactive });
-  const fragment = redirectResult.split('#')[1] || '';
-  const fragParams = new URLSearchParams(fragment);
-  const accessToken = fragParams.get('access_token');
-  const expiresIn = Number(fragParams.get('expires_in') || '3600');
-  if (!accessToken) throw new Error('Failed to obtain access token');
-  const expiry = Date.now() + expiresIn * 1000;
-  await saveToken({ accessToken, expiry });
-  return accessToken;
+    const authUrl = new URL(GOOGLE_AUTH_BASE);
+    authUrl.searchParams.set('client_id', clientId);
+    authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('response_type', 'token');
+    authUrl.searchParams.set('scope', 'https://www.googleapis.com/auth/spreadsheets');
+    authUrl.searchParams.set('prompt', 'consent');
+    authUrl.searchParams.set('include_granted_scopes', 'true');
+    try { console.debug('[JT][Auth] Auth URL:', authUrl.toString()); } catch {}
+
+    const redirectResult = await chrome.identity.launchWebAuthFlow({ url: authUrl.toString(), interactive });
+    const fragment = redirectResult.split('#')[1] || '';
+    const fragParams = new URLSearchParams(fragment);
+    const accessToken = fragParams.get('access_token');
+    const expiresIn = Number(fragParams.get('expires_in') || '3600');
+    if (!accessToken) throw new Error('Failed to obtain access token');
+    const expiry = Date.now() + expiresIn * 1000;
+    await saveToken({ accessToken, expiry });
+    return accessToken;
   })();
   try {
     return await AUTH_IN_FLIGHT;
